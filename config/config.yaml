@@ -1,0 +1,16 @@
+# Configuration for the crypto trading algorithm.
+# All defaults here are deliberately conservative and meant for learning,
+# not live trading.
+
+data:
+  symbol: BTC/USDT
+  timeframe: 1d
+  limit: 730          # ~2 years of daily candles
+
+backtest:
+  fee: 0.001           # 0.1% per position change
+  initial_capital: 10000
+
+strategy:
+  fast_ma: 20
+  slow_ma: 50
