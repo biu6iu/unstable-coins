@@ -1,10 +1,3 @@
-"""Tests for the backtest engine.
-
-Covers the three non-negotiable behaviours from CLAUDE.md: no lookahead
-(a signal at bar t earns bar t+1's return), correct fee charging, and a
-buy-and-hold sanity check.
-"""
-
 import numpy as np
 import pandas as pd
 import pytest
@@ -48,7 +41,7 @@ class _FixedSignalStrategy(Strategy):
 def test_signal_at_bar_t_earns_return_of_bar_t_plus_1_not_bar_t():
     close = [100, 110, 90, 130]
     df = _make_ohlcv(close)
-    # Long only at bar index 1; flat everywhere else.
+    # long only at bar index 1
     strategy = _FixedSignalStrategy([0, 1, 0, 0])
 
     result = Backtester(fee=0.0, initial_capital=100.0).run(df, strategy)
@@ -56,8 +49,7 @@ def test_signal_at_bar_t_earns_return_of_bar_t_plus_1_not_bar_t():
     # position is signal shifted by one bar: position[2] = signal[1] = 1.
     assert list(result.positions) == [0, 0, 1, 0]
 
-    # Bar 2's strategy return must equal the asset's bar1->bar2 return
-    # (90/110 - 1), not bar0->bar1's return - proving no lookahead.
+    # check no lookahead 
     expected_bar2_return = close[2] / close[1] - 1
     assert result.strategy_returns.iloc[2] == pytest.approx(expected_bar2_return)
     assert result.strategy_returns.iloc[0] == 0
@@ -66,7 +58,7 @@ def test_signal_at_bar_t_earns_return_of_bar_t_plus_1_not_bar_t():
 
 
 def test_fee_charged_exactly_on_each_position_change():
-    close = [100, 100, 100, 100]  # flat price: isolates the fee's effect
+    close = [100, 100, 100, 100]  
     df = _make_ohlcv(close)
     strategy = _FixedSignalStrategy([1, 0, 0, 0])
     fee = 0.001
@@ -74,8 +66,6 @@ def test_fee_charged_exactly_on_each_position_change():
 
     result = Backtester(fee=fee, initial_capital=initial_capital).run(df, strategy)
 
-    # position = signal shifted by 1: [0, 1, 0, 0] -> trades at bar 1 (0->1)
-    # and bar 2 (1->0).
     assert list(result.positions) == [0, 1, 0, 0]
     assert result.trade_count == 2
 
