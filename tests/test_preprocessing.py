@@ -1,7 +1,4 @@
-"""Tests for preprocessing: DataCleaner and FeatureEngineer."""
-
 import logging
-
 import numpy as np
 import pandas as pd
 import pytest
@@ -22,9 +19,6 @@ def _make_ohlcv(index, close):
         },
         index=index,
     )
-
-
-# ---------- DataCleaner ----------
 
 
 def test_cleaner_drops_duplicate_timestamps(caplog):
@@ -60,7 +54,7 @@ def test_cleaner_forward_fills_small_gaps(caplog):
         cleaned = DataCleaner(max_ffill=3).clean(df)
 
     assert pd.Timestamp("2022-01-03") in cleaned.index
-    assert cleaned.loc["2022-01-03", "close"] == 2  # forward-filled from Jan 2
+    assert cleaned.loc["2022-01-03", "close"] == 2
     assert any("fill" in message.lower() for message in caplog.messages)
 
 
@@ -81,9 +75,6 @@ def test_cleaner_enforces_float_dtype():
     cleaned = DataCleaner().clean(df)
 
     assert (cleaned.dtypes == float).all()
-
-
-# ---------- FeatureEngineer ----------
 
 
 @pytest.fixture
