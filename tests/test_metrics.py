@@ -1,5 +1,3 @@
-"""Tests for PerformanceMetrics - checked against small hand-computed examples."""
-
 import numpy as np
 import pandas as pd
 import pytest
