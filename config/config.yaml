@@ -10,3 +10,8 @@ backtest:
 strategy:
   fast_ma: 20
   slow_ma: 50
+
+# fast/slow combinations for scripts/param_sweep.py (stretch phase)
+sweep:
+  fast_options: [10, 20, 30]
+  slow_options: [50, 100, 150]

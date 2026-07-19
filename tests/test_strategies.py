@@ -1,11 +1,11 @@
-"""Tests for the strategy layer."""
-
 import numpy as np
 import pandas as pd
 import pytest
 
+from src.strategies.base import Strategy
 from src.strategies.buy_and_hold import BuyAndHoldStrategy
 from src.strategies.ma_crossover import MACrossoverStrategy
+from src.strategies.rsi_filter import RSIFilterStrategy
 
 
 def _make_ohlcv(close):
@@ -78,3 +78,45 @@ def test_buy_and_hold_does_not_mutate_input():
 def test_strategy_names():
     assert MACrossoverStrategy(fast=20, slow=50).name == "MACrossover(20,50)"
     assert BuyAndHoldStrategy().name == "BuyAndHold"
+
+
+class _AlwaysLongStrategy(Strategy):
+    """Test double: always long, so any suppression must come from the filter."""
+
+    @property
+    def name(self) -> str:
+        return "AlwaysLong"
+
+    def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        out = df.copy()
+        out["signal"] = 1
+        return out
+
+
+def test_rsi_filter_suppresses_signal_when_overbought():
+    # A strong, sustained uptrend (all gains, no losses) drives RSI to 100.
+    close = [10 + i for i in range(30)]
+    df = _make_ohlcv(close)
+
+    out = RSIFilterStrategy(_AlwaysLongStrategy(), rsi_window=14, rsi_overbought=70.0).generate_signals(df)
+
+    rsi = out["rsi_14"]
+    assert (rsi.dropna() > 70).any()  # sanity check: the setup actually triggers overbought
+    assert (out.loc[rsi > 70, "signal"] == 0).all()
+    assert (out.loc[rsi <= 70, "signal"] == 1).all()
+
+
+def test_rsi_filter_does_not_mutate_input():
+    close = [10, 11, 12, 11, 10]
+    df = _make_ohlcv(close)
+    original = df.copy()
+
+    RSIFilterStrategy(_AlwaysLongStrategy()).generate_signals(df)
+
+    pd.testing.assert_frame_equal(df, original)
+
+
+def test_rsi_filter_name_includes_wrapped_strategy():
+    filtered = RSIFilterStrategy(MACrossoverStrategy(fast=20, slow=50), rsi_overbought=70.0)
+
+    assert filtered.name == "RSIFilter(MACrossover(20,50),70.0)"
