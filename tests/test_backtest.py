@@ -99,3 +99,46 @@ def test_result_carries_strategy_name_and_input_df():
 
     assert result.strategy_name == "BuyAndHold"
     pd.testing.assert_frame_equal(result.df, df)
+
+
+def test_gross_returns_and_fee_drag_reconcile_with_equity_curve():
+    # Hand-computed: position = [0, 1, 0], asset_returns = [0, 0.2, -0.25].
+    close = [100, 120, 90]
+    df = _make_ohlcv(close)
+    strategy = _FixedSignalStrategy([1, 0, 1])
+    fee = 0.01
+    initial_capital = 1000.0
+
+    result = Backtester(fee=fee, initial_capital=initial_capital).run(df, strategy)
+
+    assert list(result.gross_returns) == pytest.approx([0, 0.2, 0])
+    assert list(result.fee_drag) == pytest.approx([0, 0.01, 0.01])
+
+    expected_equity = initial_capital * (
+        1 + result.gross_returns - result.fee_drag
+    ).cumprod()
+    pd.testing.assert_series_equal(
+        result.equity_curve, expected_equity, check_names=False
+    )
+    assert result.equity_curve.iloc[-1] == pytest.approx(1178.1)
+
+
+def test_cash_and_units_ledger_balances_to_equity_curve():
+    # Same scenario as above, hand-computed: buy 10 units at bar 1 (cost
+    # 1000 from equity_prior=1000, price=100), pay a $10 fee from cash,
+    # then mark to market and unwind back to cash at bar 2.
+    close = [100, 120, 90]
+    df = _make_ohlcv(close)
+    strategy = _FixedSignalStrategy([1, 0, 1])
+    fee = 0.01
+    initial_capital = 1000.0
+
+    result = Backtester(fee=fee, initial_capital=initial_capital).run(df, strategy)
+
+    assert list(result.units) == pytest.approx([0, 10, 0])
+    assert list(result.cash) == pytest.approx([1000, -10, 1178.1])
+
+    ledger_equity = result.cash + result.units * df["close"]
+    pd.testing.assert_series_equal(
+        ledger_equity, result.equity_curve, check_names=False
+    )

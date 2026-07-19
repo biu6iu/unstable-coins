@@ -16,6 +16,7 @@ def _make_result(equity_values, returns_values=None, trade_count=1, strategy_nam
     )
     df = pd.DataFrame({"close": equity_values}, index=index)
     positions = pd.Series(0, index=index)
+    zeros = pd.Series(0.0, index=index)
     return BacktestResult(
         df=df,
         positions=positions,
@@ -23,6 +24,10 @@ def _make_result(equity_values, returns_values=None, trade_count=1, strategy_nam
         equity_curve=equity,
         trade_count=trade_count,
         strategy_name=strategy_name,
+        gross_returns=zeros,
+        fee_drag=zeros,
+        cash=equity,
+        units=zeros,
     )
 
 
