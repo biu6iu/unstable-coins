@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from src.backtest.engine import Backtester
+from src.backtest.result import BacktestResult
 from src.data.base import DataProvider
 from src.evaluation.metrics import PerformanceMetrics
 from src.evaluation.plots import ReportPlotter
@@ -29,7 +30,7 @@ class Pipeline:
         self.metrics = metrics
         self.plotter = plotter
 
-    def run(self, plot_filename: str = "report.png") -> str:
+    def run(self, plot_filename: str = "report.png") -> list[BacktestResult]:
         raw = self.provider.fetch()
         clean = self.cleaner.clean(raw)
         featured = self.engineer.returns(clean)
@@ -37,5 +38,6 @@ class Pipeline:
         results = [self.backtester.run(featured, strategy) for strategy in self.strategies]
 
         self.plotter.plot(results[0], results[-1], filename=plot_filename)
+        self.metrics.compare(results)
 
-        return self.metrics.compare(results)
+        return results

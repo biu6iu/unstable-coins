@@ -15,5 +15,6 @@ class BacktestResult:
     strategy_name: str
     gross_returns: pd.Series
     fee_drag: pd.Series
+    slippage_drag: pd.Series
     cash: pd.Series
     units: pd.Series

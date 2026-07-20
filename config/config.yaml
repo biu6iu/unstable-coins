@@ -4,14 +4,16 @@ data:
   limit: 730          # ~2 years of daily candles
 
 backtest:
-  fee: 0.001           # 0.1% per position change
+  fee: 0.001            # 0.1% per position change
+  slippage_bps: 5        # adverse price impact per position change, in basis points
+  min_holding_period: 0  # bars; 0 = off, otherwise suppresses flips faster than this
   initial_capital: 10000
 
 strategy:
   fast_ma: 20
   slow_ma: 50
 
-# fast/slow combinations for scripts/param_sweep.py (stretch phase)
+# fast/slow combinations for parameter sweep
 sweep:
   fast_options: [10, 20, 30]
   slow_options: [50, 100, 150]

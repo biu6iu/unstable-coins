@@ -89,12 +89,13 @@ class WalkForwardValidator:
         strategy_returns = pd.concat([r.strategy_returns for r in fold_results])
         gross_returns = pd.concat([r.gross_returns for r in fold_results])
         fee_drag = pd.concat([r.fee_drag for r in fold_results])
+        slippage_drag = pd.concat([r.slippage_drag for r in fold_results])
 
         equity_curve = self.backtester.initial_capital * (1 + strategy_returns).cumprod()
         equity_prior = equity_curve.shift(1).fillna(self.backtester.initial_capital)
         prior_close = df["close"].shift(1)
         units = (positions * equity_prior / prior_close).fillna(0)
-        cash = equity_prior * (1 - positions - fee_drag)
+        cash = equity_prior * (1 - positions - fee_drag - slippage_drag)
 
         return BacktestResult(
             df=df,
@@ -105,6 +106,7 @@ class WalkForwardValidator:
             strategy_name=f"WalkForward({fold_results[0].strategy_name})",
             gross_returns=gross_returns,
             fee_drag=fee_drag,
+            slippage_drag=slippage_drag,
             cash=cash,
             units=units,
         )

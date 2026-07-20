@@ -3,9 +3,6 @@ import sys
 from pathlib import Path
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-
 from src.backtest.engine import Backtester
 from src.data.ccxt_provider import CCXTDataProvider
 from src.data.synthetic import SyntheticDataProvider
@@ -13,6 +10,8 @@ from src.evaluation.metrics import PerformanceMetrics
 from src.preprocessing.cleaner import DataCleaner
 from src.preprocessing.features import FeatureEngineer
 from src.strategies.ma_crossover import MACrossoverStrategy
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 CONFIG_PATH = Path("config/config.yaml")
 
@@ -41,7 +40,10 @@ def main() -> None:
 
     backtest_cfg = config["backtest"]
     backtester = Backtester(
-        fee=backtest_cfg["fee"], initial_capital=backtest_cfg["initial_capital"]
+        fee=backtest_cfg["fee"],
+        initial_capital=backtest_cfg["initial_capital"],
+        slippage_bps=backtest_cfg.get("slippage_bps", 5.0),
+        min_holding_period=backtest_cfg.get("min_holding_period", 0),
     )
     metrics = PerformanceMetrics()
 

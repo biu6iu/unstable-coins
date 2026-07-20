@@ -26,6 +26,7 @@ def _make_result(equity_values, returns_values=None, trade_count=1, strategy_nam
         strategy_name=strategy_name,
         gross_returns=zeros,
         fee_drag=zeros,
+        slippage_drag=zeros,
         cash=equity,
         units=zeros,
     )
