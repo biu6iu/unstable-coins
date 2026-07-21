@@ -2,8 +2,12 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import yaml
 
+from src.analysis.monte_carlo import MonteCarloAnalyzer
 from src.backtest.engine import Backtester
 from src.backtest.result import BacktestResult
 from src.data.ccxt_provider import CCXTDataProvider
@@ -15,8 +19,6 @@ from src.preprocessing.cleaner import DataCleaner
 from src.preprocessing.features import FeatureEngineer
 from src.strategies.buy_and_hold import BuyAndHoldStrategy
 from src.strategies.ma_crossover import MACrossoverStrategy
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +64,17 @@ def main() -> None:
         BuyAndHoldStrategy(),
     ]
 
+    mc_cfg = config.get("monte_carlo", {})
+    monte_carlo = (
+        MonteCarloAnalyzer(
+            n_trials=mc_cfg.get("n_trials", 5000),
+            block_length=mc_cfg.get("block_length", 20),
+            noise_std=mc_cfg.get("noise_std", 0.001),
+        )
+        if mc_cfg.get("enabled", False)
+        else None
+    )
+
     pipeline = Pipeline(
         provider=provider,
         cleaner=DataCleaner(),
@@ -70,8 +83,9 @@ def main() -> None:
         backtester=backtester,
         metrics=PerformanceMetrics(),
         plotter=ReportPlotter(),
+        monte_carlo=monte_carlo,
     )
-    
+
     results = pipeline.run(plot_filename="ma_crossover_vs_buy_and_hold.png")
     _print_cost_impact_table(results)
 

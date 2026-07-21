@@ -1,6 +1,9 @@
 from __future__ import annotations
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import yaml
 
 from src.backtest.engine import Backtester
@@ -10,8 +13,6 @@ from src.evaluation.metrics import PerformanceMetrics
 from src.preprocessing.cleaner import DataCleaner
 from src.preprocessing.features import FeatureEngineer
 from src.strategies.ma_crossover import MACrossoverStrategy
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 CONFIG_PATH = Path("config/config.yaml")
 
