@@ -1,3 +1,21 @@
+[project]
+name = "crypto-trading-framework"
+version = "1.0.0"
+
+dependencies = [
+    "pandas",
+    "numpy",
+    "pyarrow",
+    "ccxt",
+    "matplotlib",
+    "pyyaml"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest"
+]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
