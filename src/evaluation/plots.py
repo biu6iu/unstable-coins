@@ -6,6 +6,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 
+from src.analysis.monte_carlo import MonteCarloResult
 from src.backtest.result import BacktestResult
 
 DEFAULT_REPORTS_DIR = Path("reports")
@@ -51,3 +52,24 @@ class ReportPlotter:
         ax.plot(benchmark.equity_curve.index, benchmark.equity_curve, label=benchmark.strategy_name)
         ax.set_title("Equity Curve: Strategy vs Benchmark")
         ax.legend(loc="best")
+
+    def plot_monte_carlo(self, mc_result: MonteCarloResult, label: str = "", filename: str = "monte_carlo.png") -> Path:
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        fig, (ax_equity, ax_drawdown) = plt.subplots(2, 1, figsize=(10, 8))
+
+        ax_equity.hist(mc_result.final_equity, bins=50, color="steelblue", alpha=0.8)
+        ax_equity.axvline(mc_result.actual_final_equity, color="black", linestyle="--", label="Actual")
+        ax_equity.set_title(f"{label} - Bootstrap Final Equity Distribution".strip(" -"))
+        ax_equity.legend(loc="best")
+
+        ax_drawdown.hist(mc_result.max_drawdown, bins=50, color="firebrick", alpha=0.8)
+        ax_drawdown.axvline(mc_result.actual_max_drawdown, color="black", linestyle="--", label="Actual")
+        ax_drawdown.set_title(f"{label} - Bootstrap Max Drawdown Distribution".strip(" -"))
+        ax_drawdown.legend(loc="best")
+
+        fig.tight_layout()
+        output_path = self.output_dir / filename
+        fig.savefig(output_path)
+        plt.close(fig)
+        return output_path

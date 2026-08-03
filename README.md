@@ -62,3 +62,13 @@ strategy families, since each is a bet on different market behaviour:
    volatility, Sharpe ratio, maximum drawdown, trade count) reported
    for every strategy alongside the buy-and-hold benchmark, with equity
    curve and signal charts.
+6. **Monte Carlo analysis** - Monte Carlo analysis, enabled via
+   `config.yaml`'s `monte_carlo.enabled` flag: block bootstrap
+   resampling of a strategy's daily returns produces DISTRIBUTIONS of
+   final return and max drawdown (not just the single historical
+   numbers as a single backtest is one draw from many the same daily
+   behaviour could have produced, and drawdown is especially
+   order-dependent), plus a noise-perturbation check that re-runs the
+   strategy on many small random perturbations of the price series to
+   reveal how much a strategy's edge depends on the exact historical
+   path.
