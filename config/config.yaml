@@ -9,10 +9,6 @@ backtest:
   min_holding_period: 0  # bars; 0 = off, otherwise suppresses flips faster than this
   initial_capital: 10000
 
-strategy:
-  fast_ma: 20
-  slow_ma: 50
-
 # strategy registry
 strategies:
   - name: ma_crossover
