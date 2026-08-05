@@ -42,3 +42,15 @@ class FeatureEngineer:
         rets = out[column].pct_change()
         out[f"volatility_{window}"] = rets.rolling(window=window).std()
         return out
+
+    def rolling_max(self, df: pd.DataFrame, window: int, column: str = "close") -> pd.DataFrame:
+        """Add a rolling maximum (e.g. the upper bound of a Donchian channel)"""
+        out = df.copy()
+        out[f"rolling_max_{window}"] = out[column].rolling(window=window).max()
+        return out
+
+    def rolling_min(self, df: pd.DataFrame, window: int, column: str = "close") -> pd.DataFrame:
+        """Add a rolling minimum (e.g. the lower bound of a Donchian channel)"""
+        out = df.copy()
+        out[f"rolling_min_{window}"] = out[column].rolling(window=window).min()
+        return out
