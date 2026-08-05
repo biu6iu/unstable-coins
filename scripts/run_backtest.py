@@ -6,11 +6,13 @@ from _common import build_backtester, build_provider, load_config
 from src.analysis.monte_carlo import MonteCarloAnalyzer
 from src.backtest.engine import Backtester
 from src.backtest.result import BacktestResult
+from src.data.base import DataProvider
 from src.evaluation.metrics import PerformanceMetrics, format_table
 from src.evaluation.plots import ReportPlotter
 from src.pipeline import Pipeline
 from src.preprocessing.cleaner import DataCleaner
 from src.preprocessing.features import FeatureEngineer
+from src.strategies.base import Strategy
 from src.strategies.ensemble import VotingStrategy, print_correlation_matrix
 from src.strategies.ma_crossover import MACrossoverStrategy
 from src.strategies.registry import STRATEGY_REGISTRY, build_strategies
@@ -27,15 +29,31 @@ def main() -> None:
 
     provider = build_provider(config)
     backtester = build_backtester(config)
-
     strategy_configs = config["strategies"]
-    strategies = build_strategies(strategy_configs)
+    strategies, ensemble = _build_strategies(strategy_configs)
 
-    # example ensemble: trend-following + mean reversion + breakout, so
-    # members win/lose in different regimes rather than restating the same
-    # bet three times (see the correlation diagnostic below). Inserted
-    # before buy_and_hold so buy_and_hold stays the last/benchmark entry
-    # the pipeline plots against.
+    metrics = PerformanceMetrics()
+    monte_carlo = _build_monte_carlo(config)
+    pipeline = _build_pipeline(provider, backtester, strategies, metrics, monte_carlo)
+
+    plain_res = pipeline.run(plot_filename="strategy_comparison.png")
+    _print_cost_impact_table(plain_res)
+    _report_ensemble_diagnostics(ensemble, plain_res, monte_carlo)
+
+    wf_res = _run_walk_forward(provider, backtester, metrics, strategy_configs, config["walk_forward"])
+    _print_combined_table(plain_res, wf_res, metrics)
+
+
+def _build_strategies(strategy_configs: list[dict]) -> tuple[list[Strategy], VotingStrategy]:
+    """
+    Build the config/registry-driven strategies, plus one hand-built example
+    ensemble (trend-following + mean reversion + breakout, so members
+    win/lose in different regimes rather than restating the same bet three
+    times - see the correlation diagnostic in _report_ensemble_diagnostics).
+    Inserted before buy_and_hold so buy_and_hold stays the last/benchmark
+    entry the pipeline plots against.
+    """
+    strategies = build_strategies(strategy_configs)
     ensemble = VotingStrategy(
         [
             MACrossoverStrategy(fast=20, slow=50),
@@ -46,21 +64,29 @@ def main() -> None:
     )
     bh_index = next(i for i, s in enumerate(strategies) if s.name == "BuyAndHold")
     strategies.insert(bh_index, ensemble)
+    return strategies, ensemble
 
-    metrics = PerformanceMetrics()
 
+def _build_monte_carlo(config: dict) -> MonteCarloAnalyzer | None:
+    """Monte Carlo analysis is opt-in via config's monte_carlo.enabled flag"""
     mc_cfg = config.get("monte_carlo", {})
-    monte_carlo = (
-        MonteCarloAnalyzer(
-            n_trials=mc_cfg.get("n_trials", 5000),
-            block_length=mc_cfg.get("block_length", 20),
-            noise_std=mc_cfg.get("noise_std", 0.001),
-        )
-        if mc_cfg.get("enabled", False)
-        else None
+    if not mc_cfg.get("enabled", False):
+        return None
+    return MonteCarloAnalyzer(
+        n_trials=mc_cfg.get("n_trials", 5000),
+        block_length=mc_cfg.get("block_length", 20),
+        noise_std=mc_cfg.get("noise_std", 0.001),
     )
 
-    pipeline = Pipeline(
+
+def _build_pipeline(
+    provider: DataProvider,
+    backtester: Backtester,
+    strategies: list[Strategy],
+    metrics: PerformanceMetrics,
+    monte_carlo: MonteCarloAnalyzer | None,
+) -> Pipeline:
+    return Pipeline(
         provider=provider,
         cleaner=DataCleaner(),
         engineer=FeatureEngineer(),
@@ -70,16 +96,6 @@ def main() -> None:
         plotter=ReportPlotter(),
         monte_carlo=monte_carlo,
     )
-
-    plain_res = pipeline.run(plot_filename="strategy_comparison.png")
-    _print_cost_impact_table(plain_res)
-    _report_ensemble_diagnostics(ensemble, plain_res, monte_carlo)
-
-    # provider.fetch() is a cache hit so this reconstructs the exact df pipeline used internally without a second network round-trip
-    df = FeatureEngineer().returns(DataCleaner().clean(provider.fetch()))
-    wf_res = _run_walk_forward(df, backtester, metrics, strategy_configs, config["walk_forward"])
-
-    _print_combined_table(plain_res, wf_res, metrics)
 
 
 def _report_ensemble_diagnostics(ensemble: VotingStrategy, plain_res: list[BacktestResult], monte_carlo: MonteCarloAnalyzer | None) -> None:
@@ -107,8 +123,17 @@ def _report_ensemble_diagnostics(ensemble: VotingStrategy, plain_res: list[Backt
         monte_carlo.print_drawdown_comparison(comparisons)
 
 
-def _run_walk_forward(df, backtester: Backtester, metrics: PerformanceMetrics, strategy_configs: list[dict], wf_cfg: dict) -> list[BacktestResult]:
+def _run_walk_forward(
+    provider: DataProvider,
+    backtester: Backtester,
+    metrics: PerformanceMetrics,
+    strategy_configs: list[dict],
+    wf_cfg: dict,
+) -> list[BacktestResult]:
     """Run every registered strategy through WalkForwardValidator"""
+    # provider.fetch() is a cache hit so this reconstructs the exact df pipeline used internally without a second network round-trip
+    df = FeatureEngineer().returns(DataCleaner().clean(provider.fetch()))
+
     validator = WalkForwardValidator(
         backtester=backtester,
         metrics=metrics,
