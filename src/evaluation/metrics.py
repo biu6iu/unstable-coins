@@ -1,5 +1,6 @@
 from __future__ import annotations
 import numpy as np
+import pandas as pd
 
 from src.backtest.result import BacktestResult
 
@@ -14,6 +15,12 @@ _COLUMNS = [
     "max_drawdown",
     "trade_count",
 ]
+
+def max_drawdown(equity: pd.Series) -> float:
+    """Peak-to-trough decline of an equity curve, as a fraction (e.g. -0.25 = 25% drawdown)"""
+    running_max = equity.cummax()
+    return (equity / running_max - 1).min()
+
 
 class PerformanceMetrics:
 
@@ -35,16 +42,13 @@ class PerformanceMetrics:
             else np.nan
         )
 
-        running_max = equity.cummax()
-        max_drawdown = (equity / running_max - 1).min()
-
         return {
             "strategy": result.strategy_name,
             "total_return": total_return,
             "cagr": cagr,
             "annualised_volatility": annualised_volatility,
             "sharpe": sharpe,
-            "max_drawdown": max_drawdown,
+            "max_drawdown": max_drawdown(equity),
             "trade_count": result.trade_count,
         }
 

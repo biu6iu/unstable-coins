@@ -5,6 +5,7 @@ import pandas as pd
 
 from src.backtest.engine import Backtester
 from src.backtest.result import BacktestResult
+from src.evaluation.metrics import max_drawdown
 from src.strategies.base import Strategy
 
 PERCENTILES = (5, 25, 50, 75, 95)
@@ -110,14 +111,13 @@ class MonteCarloAnalyzer:
         equity_paths = starting_equity * np.cumprod(1 + sampled_returns, axis=1)
         final_equity = equity_paths[:, -1]
         running_max = np.maximum.accumulate(equity_paths, axis=1)
-        max_drawdown = (equity_paths / running_max - 1).min(axis=1)
+        trial_max_drawdown = (equity_paths / running_max - 1).min(axis=1)
 
-        actual_running_max = result.equity_curve.cummax()
-        actual_max_drawdown = (result.equity_curve / actual_running_max - 1).min()
+        actual_max_drawdown = max_drawdown(result.equity_curve)
 
         return MonteCarloResult(
             final_equity=final_equity,
-            max_drawdown=max_drawdown,
+            max_drawdown=trial_max_drawdown,
             actual_final_equity=float(result.equity_curve.iloc[-1]),
             actual_max_drawdown=float(actual_max_drawdown),
             initial_capital=starting_equity,
