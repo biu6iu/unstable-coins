@@ -17,8 +17,8 @@ from src.evaluation.plots import ReportPlotter
 from src.pipeline import Pipeline
 from src.preprocessing.cleaner import DataCleaner
 from src.preprocessing.features import FeatureEngineer
-from src.strategies.buy_and_hold import BuyAndHoldStrategy
-from src.strategies.ma_crossover import MACrossoverStrategy
+from src.strategies.registry import STRATEGY_REGISTRY, build_strategies
+from src.validation.walk_forward import WalkForwardValidator
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ def _build_provider(config: dict):
         ccxt_provider.fetch() 
         return ccxt_provider
     except Exception as exc:
-        logger.warning("CCXT fetch failed (%s); falling back to synthetic data", exc)
+        logger.warning("CCXT fetch failed (%s)", exc)
         return SyntheticDataProvider(n_periods=data_cfg["limit"])
 
 
@@ -58,11 +58,9 @@ def main() -> None:
         min_holding_period=backtest_cfg.get("min_holding_period", 0),
     )
 
-    strategy_cfg = config["strategy"]
-    strategies = [
-        MACrossoverStrategy(fast=strategy_cfg["fast_ma"], slow=strategy_cfg["slow_ma"]),
-        BuyAndHoldStrategy(),
-    ]
+    strategy_configs = config["strategies"]
+    strategies = build_strategies(strategy_configs)
+    metrics = PerformanceMetrics()
 
     mc_cfg = config.get("monte_carlo", {})
     monte_carlo = (
@@ -81,13 +79,44 @@ def main() -> None:
         engineer=FeatureEngineer(),
         strategies=strategies,
         backtester=backtester,
-        metrics=PerformanceMetrics(),
+        metrics=metrics,
         plotter=ReportPlotter(),
         monte_carlo=monte_carlo,
     )
 
-    results = pipeline.run(plot_filename="ma_crossover_vs_buy_and_hold.png")
-    _print_cost_impact_table(results)
+    plain_results = pipeline.run(plot_filename="strategy_comparison.png")
+    _print_cost_impact_table(plain_results)
+
+    # provider.fetch() is a cache hit so this reconstructs the exact df pipeline used internally without a second network round-trip
+    df = FeatureEngineer().returns(DataCleaner().clean(provider.fetch()))
+    wf_results = _run_walk_forward(df, backtester, metrics, strategy_configs, config["walk_forward"])
+
+    _print_combined_table(plain_results, wf_results, metrics)
+
+
+def _run_walk_forward(df, backtester: Backtester, metrics: PerformanceMetrics, strategy_configs: list[dict], wf_cfg: dict) -> list[BacktestResult]:
+    """Run every registered strategy through WalkForwardValidator"""
+    validator = WalkForwardValidator(
+        backtester=backtester,
+        metrics=metrics,
+        train_size=wf_cfg["train_size"],
+        test_size=wf_cfg["test_size"],
+        expanding=wf_cfg.get("expanding", False),
+    )
+
+    stitched_results = []
+    for entry in strategy_configs:
+        strategy_cls = STRATEGY_REGISTRY[entry["name"]]
+        params = entry.get("params", {})
+        print(f"\nWalk-forward folds: {entry['name']}")
+        wf_result = validator.run(
+            df,
+            strategy_factory=strategy_cls,
+            param_grid=[params],
+            selection_metric="sharpe",
+        )
+        stitched_results.append(wf_result.stitched_result)
+    return stitched_results
 
 
 def _print_cost_impact_table(results: list[BacktestResult]) -> None:
@@ -117,6 +146,27 @@ def _print_cost_impact_table(results: list[BacktestResult]) -> None:
             *(f"{row[c]:.4f}".ljust(widths[c]) for c in columns[1:]),
         ]
         print(" | ".join(cells))
+
+
+def _print_combined_table(plain_results: list[BacktestResult], wf_results: list[BacktestResult], metrics: PerformanceMetrics) -> None:
+    columns = ["mode", "strategy", "total_return", "sharpe", "max_drawdown", "trade_count"]
+    rows = []
+    for mode, results in (("plain", plain_results), ("walk_forward", wf_results)):
+        for result in results:
+            row = metrics.compute(result)
+            row["mode"] = mode
+            rows.append(row)
+
+    def _fmt(value) -> str:
+        return f"{value:.4f}" if isinstance(value, float) else str(value)
+
+    widths = {c: max(len(c), *(len(_fmt(row[c])) for row in rows)) for c in columns}
+    header = " | ".join(c.ljust(widths[c]) for c in columns)
+    print("\nCombined comparison (plain backtest vs walk-forward out-of-sample):")
+    print(header)
+    print("-+-".join("-" * widths[c] for c in columns))
+    for row in rows:
+        print(" | ".join(_fmt(row[c]).ljust(widths[c]) for c in columns))
 
 
 if __name__ == "__main__":
