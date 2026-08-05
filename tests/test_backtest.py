@@ -227,6 +227,37 @@ def test_min_holding_period_suppresses_single_bar_whipsaw_flips():
     assert result.trade_count == 1
 
 
+def test_constant_fractional_position_earns_proportional_asset_return():
+    # SoftVotingStrategy-style conviction sizing: a constant 0.5 position
+    # (after the one-bar shift) must earn exactly half the underlying
+    # asset's return on every bar, proving the engine scales gross return
+    # by position size linearly with no special-casing for fractions.
+    close = [100, 110, 121, 133.1]  # +10% every bar
+    df = _make_ohlcv(close)
+    strategy = _FixedSignalStrategy([0.5, 0.5, 0.5, 0.5])
+
+    result = Backtester(fee=0.0, initial_capital=1000.0, slippage_bps=0.0).run(df, strategy)
+
+    asset_returns = [0, 0.10, 0.10, 0.10]
+    expected_gross = [0.5 * r for r in asset_returns]
+    assert list(result.gross_returns) == pytest.approx(expected_gross)
+
+
+def test_fractional_position_change_charges_proportional_fee():
+    # A 0.0 -> 0.6 position change must be charged 0.6 * fee, proving
+    # fee-on-position-change scales by the size of the fractional move,
+    # not a flat per-trade charge.
+    close = [100, 100, 100]
+    df = _make_ohlcv(close)
+    strategy = _FixedSignalStrategy([0.6, 0.6, 0.6])
+    fee = 0.001
+
+    result = Backtester(fee=fee, initial_capital=1000.0, slippage_bps=0.0).run(df, strategy)
+
+    assert list(result.positions) == pytest.approx([0, 0.6, 0.6])
+    assert list(result.fee_drag) == pytest.approx([0, 0.6 * fee, 0])
+
+
 def test_min_holding_period_zero_leaves_positions_unaffected():
     close = [100] * 7
     df = _make_ohlcv(close)
