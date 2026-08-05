@@ -1,32 +1,5 @@
-"""Monte Carlo robustness analysis for backtest results.
-
-CORE INSIGHT: a historical backtest is ONE draw from a distribution of
-outcomes the strategy's daily behaviour could plausibly have produced.
-Maximum drawdown is especially order-dependent - the same set of daily
-returns, replayed in a different sequence, can front-load its losses
-into one deep drawdown or spread them thin - so the realised max
-drawdown in a single backtest typically UNDERSTATES the range of
-drawdowns that behaviour could produce. Resampling turns this hidden
-uncertainty into an explicit distribution instead of one historical
-number.
-
-METHOD AND ITS LIMITATION: bootstrap resampling draws returns with
-replacement, which treats every day as independent. That is a real
-simplification: if a strategy's returns are autocorrelated - as
-trend-following returns typically are, since a position is held across
-many similar bars in a row - independent resampling destroys that
-structure and can understate genuine tail risk. Block bootstrap
-resamples contiguous blocks of `block_length` bars instead of single
-bars, preserving within-block autocorrelation, and is the
-default-recommended variant here for exactly that reason.
-`block_length=1` collapses block bootstrap to plain iid bootstrap (this
-equivalence is verified directly in tests).
-"""
-
 from __future__ import annotations
-
 from dataclasses import dataclass
-
 import numpy as np
 import pandas as pd
 
@@ -36,16 +9,16 @@ from src.strategies.base import Strategy
 
 PERCENTILES = (5, 25, 50, 75, 95)
 
-
 def _percentile_summary(values: np.ndarray) -> dict[int, float]:
     return {p: float(np.percentile(values, p)) for p in PERCENTILES}
 
 
 @dataclass
 class MonteCarloResult:
-    """Distributions of final equity and max drawdown from resampled
-    trials of one strategy's realised daily returns, plus the single
-    historical (actual) values for comparison."""
+    """
+    Distributions of final equity and max drawdown from resampled trials of one strategy's daily returns, 
+    compared with historical values.
+    """
 
     final_equity: np.ndarray
     max_drawdown: np.ndarray
@@ -66,10 +39,10 @@ class MonteCarloResult:
 
 @dataclass
 class NoiseRobustnessResult:
-    """Spread of final-equity outcomes when the same strategy is re-run on
-    many small Gaussian perturbations of the input price series. A
-    fragile, overfit strategy's performance degrades sharply under tiny
-    perturbations; a robust one is largely unaffected."""
+    """
+    spread of final-equity outcomes when the same strategy is re-run on
+    many small Gaussian perturbations of the input price series
+    """
 
     final_equity: np.ndarray
     actual_final_equity: float
@@ -80,24 +53,16 @@ class NoiseRobustnessResult:
 
 
 def _simple_bootstrap_matrix(n: int, n_trials: int, rng: np.random.Generator) -> np.ndarray:
-    """iid resampling: draw n indices with replacement, independently per trial."""
+    """iid resampling"""
     return rng.integers(0, n, size=(n_trials, n))
 
 
-def _block_bootstrap_matrix(
-    n: int, block_length: int, n_trials: int, rng: np.random.Generator
-) -> np.ndarray:
-    """Resample contiguous blocks of `block_length` bars with replacement
-    and concatenate them into a series of length n, preserving
-    within-block autocorrelation. block_length<=1 has no blocks to
-    preserve, so it is delegated to the simple iid bootstrap outright
-    (rather than merely producing an equivalent result via block math),
-    guaranteeing the two agree exactly for the same seed.
-    """
+def _block_bootstrap_matrix(n: int, block_length: int, n_trials: int, rng: np.random.Generator) -> np.ndarray:
     if block_length <= 1:
         return _simple_bootstrap_matrix(n, n_trials, rng)
 
-    n_blocks = -(-n // block_length)  # ceil(n / block_length)
+    # ceil(n / block_length)
+    n_blocks = -(-n // block_length)  
     block_starts = rng.integers(0, n - block_length + 1, size=(n_trials, n_blocks))
     offsets = np.arange(block_length)
     indices = block_starts[:, :, None] + offsets[None, None, :]
@@ -105,9 +70,11 @@ def _block_bootstrap_matrix(
 
 
 def _perturb_prices(df: pd.DataFrame, noise_std: float, rng: np.random.Generator) -> pd.DataFrame:
-    """Multiply OHLC by one shared per-bar Gaussian noise factor, so the
-    perturbed series keeps consistent open/high/low/close relationships
-    for any downstream strategy or indicator. Volume is left untouched."""
+    """
+    Multiply OHLC by one shared per-bar Gaussian noise factor, so the
+    perturbed series keeps consistent OHLC relationships
+    for any downstream strategy or indicator
+    """
     noise_factor = 1 + rng.normal(loc=0.0, scale=noise_std, size=len(df))
     out = df.copy()
     for column in ("open", "high", "low", "close"):
@@ -117,25 +84,20 @@ def _perturb_prices(df: pd.DataFrame, noise_std: float, rng: np.random.Generator
 
 class MonteCarloAnalyzer:
 
-    def __init__(
-        self,
+    def __init__(self,
         n_trials: int = 5000,
         seed: int | None = 42,
         block_length: int = 20,
         noise_std: float = 0.001,
     ) -> None:
+        
         self.n_trials = n_trials
         self.seed = seed
         self.block_length = block_length
         self.noise_std = noise_std
 
-    def bootstrap(
-        self, result: BacktestResult, block_length: int | None = None
-    ) -> MonteCarloResult:
-        """Resample `result`'s daily strategy returns (with replacement,
-        same length) to rebuild an equity curve per trial, producing
-        distributions of final return and max drawdown rather than the
-        single numbers the historical backtest happened to produce."""
+    def bootstrap(self, result: BacktestResult, block_length: int | None = None) -> MonteCarloResult:
+        """Resample `result`'s daily strategy returns to rebuild an equity curve per trial"""
         block_length = self.block_length if block_length is None else block_length
         returns = result.strategy_returns.to_numpy()
         n = len(returns)
@@ -159,23 +121,14 @@ class MonteCarloAnalyzer:
             actual_final_equity=float(result.equity_curve.iloc[-1]),
             actual_max_drawdown=float(actual_max_drawdown),
             initial_capital=starting_equity,
-            block_length=block_length,
+            block_length=block_length
         )
 
-    def noise_robustness(
-        self,
-        df: pd.DataFrame,
-        strategy: Strategy,
-        backtester: Backtester,
-        noise_std: float | None = None,
-    ) -> NoiseRobustnessResult:
-        """Perturb the input price series with small Gaussian noise and
-        re-run the full strategy + backtest on each perturbed series. This
-        re-runs strategy.generate_signals and Backtester.run per trial (not
-        a vectorised operation, unlike bootstrap) because the perturbation
-        happens upstream of every indicator the strategy computes - the
-        cost is the price of testing the strategy's actual computation
-        path, the same trade-off WalkForwardValidator makes per fold."""
+    def noise_robustness(self, df: pd.DataFrame, strategy: Strategy, backtester: Backtester, noise_std: float | None = None) -> NoiseRobustnessResult:
+        """
+        perturb the input price series with small Gaussian noise and
+        re-run the full strategy + backtest on each perturbed series
+        """
         noise_std = self.noise_std if noise_std is None else noise_std
         rng = np.random.default_rng(self.seed)
 
@@ -192,6 +145,25 @@ class MonteCarloAnalyzer:
             actual_final_equity=float(actual_result.equity_curve.iloc[-1]),
             noise_std=noise_std,
         )
+
+    def compare_ensemble_drawdowns(self, ensemble_result: BacktestResult, member_results: list[BacktestResult]) -> dict[str, MonteCarloResult]:
+        comparisons = {ensemble_result.strategy_name: self.bootstrap(ensemble_result)}
+        for member_result in member_results:
+            comparisons[member_result.strategy_name] = self.bootstrap(member_result)
+        return comparisons
+
+    def print_drawdown_comparison(self, comparisons: dict[str, MonteCarloResult]) -> str:
+        lines = ["\nMonte Carlo max-drawdown comparison (ensemble vs members):"]
+        for name, mc in comparisons.items():
+            percentiles = mc.max_drawdown_percentiles()
+            lines.append(
+                f"  {name}: actual={mc.actual_max_drawdown:.4f}  "
+                + ", ".join(f"p{p}={v:.4f}" for p, v in percentiles.items())
+            )
+        
+        report = "\n".join(lines)
+        print(report)
+        return report
 
     def print_bootstrap_report(self, mc: MonteCarloResult, label: str) -> str:
         lines = [
