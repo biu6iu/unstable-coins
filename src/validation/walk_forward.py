@@ -4,7 +4,7 @@ from typing import Callable
 
 import pandas as pd
 
-from src.backtest.engine import Backtester
+from src.backtest.engine import Backtester, ledger_fields
 from src.backtest.result import BacktestResult
 from src.evaluation.metrics import PerformanceMetrics
 from src.strategies.base import Strategy
@@ -92,10 +92,9 @@ class WalkForwardValidator:
         slippage_drag = pd.concat([r.slippage_drag for r in fold_results])
 
         equity_curve = self.backtester.initial_capital * (1 + strategy_returns).cumprod()
-        equity_prior = equity_curve.shift(1).fillna(self.backtester.initial_capital)
-        prior_close = df["close"].shift(1)
-        units = (positions * equity_prior / prior_close).fillna(0)
-        cash = equity_prior * (1 - positions - fee_drag - slippage_drag)
+        cash, units = ledger_fields(
+            df["close"], positions, equity_curve, fee_drag, slippage_drag, self.backtester.initial_capital
+        )
 
         return BacktestResult(
             df=df,

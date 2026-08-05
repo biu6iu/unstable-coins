@@ -44,11 +44,9 @@ class Backtester:
         strategy_returns = gross_returns - fee_drag - slippage_drag
         equity_curve = self.initial_capital * (1 + strategy_returns).cumprod()
 
-        equity_prior = equity_curve.shift(1).fillna(self.initial_capital)
-        prior_close = signals["close"].shift(1)
-        units = (position * equity_prior / prior_close).fillna(0)
-
-        cash = equity_prior * (1 - position - fee_drag - slippage_drag)
+        cash, units = ledger_fields(
+            signals["close"], position, equity_curve, fee_drag, slippage_drag, self.initial_capital
+        )
 
         return BacktestResult(
             df=df,
@@ -63,6 +61,29 @@ class Backtester:
             cash=cash,
             units=units,
         )
+
+
+def ledger_fields(
+    close: pd.Series,
+    position: pd.Series,
+    equity_curve: pd.Series,
+    fee_drag: pd.Series,
+    slippage_drag: pd.Series,
+    initial_capital: float,
+) -> tuple[pd.Series, pd.Series]:
+    """
+    Back-solve cash and units held from the already-computed equity curve, as a
+    reconciliation view (cash + units * close == equity_curve) rather than an
+    independent forward-simulated ledger — strategy_returns above is still
+    computed by subtracting fee/slippage drag from gross returns. Shared by
+    Backtester.run and WalkForwardValidator._stitch, which reconcile results
+    the same way.
+    """
+    equity_prior = equity_curve.shift(1).fillna(initial_capital)
+    prior_close = close.shift(1)
+    units = (position * equity_prior / prior_close).fillna(0)
+    cash = equity_prior * (1 - position - fee_drag - slippage_drag)
+    return cash, units
 
 
 def _apply_min_holding_period(position: pd.Series, min_holding_period: int) -> pd.Series:
