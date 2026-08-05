@@ -5,7 +5,11 @@ import pytest
 from src.strategies.base import Strategy
 from src.strategies.buy_and_hold import BuyAndHoldStrategy
 from src.strategies.ma_crossover import MACrossoverStrategy
+from src.strategies.registry import STRATEGY_REGISTRY, build_strategies
 from src.strategies.rsi_filter import RSIFilterStrategy
+from src.strategies.rsi_mean_reversion import RSIMeanReversionStrategy
+from src.strategies.tsmom import TimeSeriesMomentumStrategy
+from src.strategies.volatility_breakout import DonchianBreakoutStrategy
 
 
 def _make_ohlcv(close):
@@ -120,3 +124,135 @@ def test_rsi_filter_name_includes_wrapped_strategy():
     filtered = RSIFilterStrategy(MACrossoverStrategy(fast=20, slow=50), rsi_overbought=70.0)
 
     assert filtered.name == "RSIFilter(MACrossover(20,50),70.0)"
+
+
+def test_rsi_mean_reversion_enters_below_buy_below_and_exits_above_exit_above():
+    # window=3, buy_below=30, exit_above=70. RSI (Wilder's smoothing,
+    # hand-verified with a script) for this close series:
+    #   [nan, nan, nan, 0.0, 0.0, 33.3, 55.6, 70.37, 80.2, 86.8, 91.2, 60.8, 40.5, 27.0]
+    # -> enters at bar 3 (RSI dips below 30), HOLDS through bars 5-6 even
+    #    though RSI is climbing back through the neutral zone (this is the
+    #    hysteresis band, not a single-bar trigger), exits at bar 7 (RSI
+    #    crosses above 70), stays flat, then re-enters at bar 13.
+    close = [100, 99, 98, 97, 96, 97, 98, 99, 100, 101, 102, 101, 100, 99]
+    df = _make_ohlcv(close)
+
+    out = RSIMeanReversionStrategy(window=3, buy_below=30.0, exit_above=70.0).generate_signals(df)
+
+    expected_signal = [0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1]
+    assert list(out["signal"]) == expected_signal
+
+
+def test_rsi_mean_reversion_rejects_buy_below_greater_or_equal_exit_above():
+    with pytest.raises(ValueError):
+        RSIMeanReversionStrategy(buy_below=50.0, exit_above=30.0)
+    with pytest.raises(ValueError):
+        RSIMeanReversionStrategy(buy_below=30.0, exit_above=30.0)
+
+
+def test_rsi_mean_reversion_does_not_mutate_input():
+    close = [100, 98, 96, 94, 96, 98, 100]
+    df = _make_ohlcv(close)
+    original = df.copy()
+
+    RSIMeanReversionStrategy(window=3).generate_signals(df)
+
+    pd.testing.assert_frame_equal(df, original)
+
+
+def test_donchian_breakout_flips_signal_on_hand_computed_bars():
+    # entry_window=3, exit_window=2 (hand-verified with a script):
+    #   entry_high (shifted): [nan, nan, nan, 11, 12, 12, 13, 13, 14, 14]
+    #   exit_low (shifted):   [nan, nan, 10, 9, 9, 8, 8, 7, 7, 6]
+    # -> enters whenever close beats the prior 3-bar high, exits whenever
+    #    it falls below the prior 2-bar low.
+    close = [10, 11, 9, 12, 8, 13, 7, 14, 6, 15]
+    df = _make_ohlcv(close)
+
+    out = DonchianBreakoutStrategy(entry_window=3, exit_window=2).generate_signals(df)
+
+    expected_signal = [0, 0, 0, 1, 0, 1, 0, 1, 0, 1]
+    assert list(out["signal"]) == expected_signal
+
+
+def test_donchian_breakout_channel_excludes_the_current_bar():
+    # Bar 3 (close=12) sets a new all-time high, but the entry channel
+    # compared against bar 3 is built from bars [0:3] only (max=11) - a
+    # high a bar makes is never the level that same bar is judged against.
+    close = [10, 11, 9, 12, 8, 13, 7, 14, 6, 15]
+    df = _make_ohlcv(close)
+
+    entry_high = df["close"].rolling(window=3).max().shift(1)
+
+    assert entry_high.iloc[3] == 11.0  # not 12.0 (bar 3's own close)
+    assert entry_high.iloc[3] != df["close"].iloc[3]
+
+
+def test_donchian_breakout_does_not_mutate_input():
+    close = [10, 11, 9, 12, 8, 13, 7, 14, 6, 15]
+    df = _make_ohlcv(close)
+    original = df.copy()
+
+    DonchianBreakoutStrategy(entry_window=3, exit_window=2).generate_signals(df)
+
+    pd.testing.assert_frame_equal(df, original)
+
+
+def test_tsmom_flips_signal_on_hand_computed_bars():
+    # lookback=2: close.shift(2) = [nan, nan, 10, 12, 9, 15]
+    # signal is 1 wherever close beats its value 2 bars ago.
+    close = [10, 12, 9, 15, 8, 20]
+    df = _make_ohlcv(close)
+
+    out = TimeSeriesMomentumStrategy(lookback=2).generate_signals(df)
+
+    expected_signal = [0, 0, 0, 1, 0, 1]
+    assert list(out["signal"]) == expected_signal
+
+
+def test_tsmom_does_not_mutate_input():
+    close = [10, 12, 9, 15, 8, 20]
+    df = _make_ohlcv(close)
+    original = df.copy()
+
+    TimeSeriesMomentumStrategy(lookback=2).generate_signals(df)
+
+    pd.testing.assert_frame_equal(df, original)
+
+
+def test_new_strategy_names():
+    assert RSIMeanReversionStrategy(window=14, buy_below=30, exit_above=50).name == \
+        "RSIMeanReversion(14,30,50)"
+    assert DonchianBreakoutStrategy(entry_window=20, exit_window=10).name == \
+        "DonchianBreakout(20,10)"
+    assert TimeSeriesMomentumStrategy(lookback=90).name == "TSMOM(90)"
+
+
+def test_registry_builds_strategies_from_config_entries():
+    configs = [
+        {"name": "ma_crossover", "params": {"fast": 10, "slow": 20}},
+        {"name": "rsi_mean_reversion", "params": {"window": 14}},
+        {"name": "donchian_breakout", "params": {}},
+        {"name": "tsmom", "params": {"lookback": 30}},
+        {"name": "buy_and_hold", "params": {}},
+    ]
+
+    strategies = build_strategies(configs)
+
+    assert [s.name for s in strategies] == [
+        "MACrossover(10,20)",
+        "RSIMeanReversion(14,30.0,50.0)",
+        "DonchianBreakout(20,10)",
+        "TSMOM(30)",
+        "BuyAndHold",
+    ]
+
+
+def test_registry_contains_all_classical_strategies():
+    assert set(STRATEGY_REGISTRY) == {
+        "buy_and_hold",
+        "ma_crossover",
+        "rsi_mean_reversion",
+        "donchian_breakout",
+        "tsmom",
+    }
