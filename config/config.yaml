@@ -19,6 +19,10 @@ strategies:
     params: {entry_window: 20, exit_window: 10}
   - name: tsmom
     params: {lookback: 90}
+  - name: rsi_filtered_crossover
+    params: {fast: 20, slow: 50, rsi_window: 14, rsi_overbought: 70.0}
+  - name: soft_voting_ensemble
+    params: {fast: 20, slow: 50, buy_below: 30, exit_above: 50, entry_window: 20, exit_window: 10}
   - name: buy_and_hold
     params: {}
 

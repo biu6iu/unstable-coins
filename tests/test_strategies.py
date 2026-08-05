@@ -4,6 +4,7 @@ import pytest
 
 from src.strategies.base import Strategy
 from src.strategies.buy_and_hold import BuyAndHoldStrategy
+from src.strategies.ensemble import SoftVotingStrategy
 from src.strategies.ma_crossover import MACrossoverStrategy
 from src.strategies.registry import STRATEGY_REGISTRY, build_strategies
 from src.strategies.rsi_filter import RSIFilterStrategy
@@ -255,4 +256,25 @@ def test_registry_contains_all_classical_strategies():
         "rsi_mean_reversion",
         "donchian_breakout",
         "tsmom",
+        "rsi_filtered_crossover",
+        "soft_voting_ensemble",
     }
+
+
+def test_registry_builds_rsi_filtered_crossover_from_config_entry():
+    strategy = build_strategies(
+        [{"name": "rsi_filtered_crossover", "params": {"fast": 10, "slow": 20}}]
+    )[0]
+    assert isinstance(strategy, RSIFilterStrategy)
+    assert isinstance(strategy.strategy, MACrossoverStrategy)
+    assert strategy.strategy.name == "MACrossover(10,20)"
+
+
+def test_registry_builds_soft_voting_ensemble_from_config_entry():
+    strategy = build_strategies([{"name": "soft_voting_ensemble", "params": {}}])[0]
+    assert isinstance(strategy, SoftVotingStrategy)
+    assert [member.name for member in strategy.strategies] == [
+        "MACrossover(20,50)",
+        "RSIMeanReversion(14,30.0,50.0)",
+        "DonchianBreakout(20,10)",
+    ]
