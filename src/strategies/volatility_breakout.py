@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
-from src.strategies.base import Strategy
+from src.strategies.base import Strategy, trigger_hold_signal
 
 
 class DonchianBreakoutStrategy(Strategy):
@@ -32,9 +31,5 @@ class DonchianBreakoutStrategy(Strategy):
         entries = close > entry_high
         exits = close < exit_low
 
-        # mark trigger bars, then hold the position between them
-        raw = pd.Series(np.nan, index=out.index)
-        raw[entries] = 1.0
-        raw[exits] = 0.0
-        out["signal"] = raw.ffill().fillna(0.0).astype(int)
+        out["signal"] = trigger_hold_signal(out.index, entries, exits)
         return out

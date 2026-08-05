@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 from src.preprocessing.features import FeatureEngineer
-from src.strategies.base import Strategy
+from src.strategies.base import Strategy, trigger_hold_signal
 
 
 class RSIMeanReversionStrategy(Strategy):
@@ -28,9 +27,5 @@ class RSIMeanReversionStrategy(Strategy):
         out = self._engineer.rsi(df, window=self.window)
         rsi = out[f"rsi_{self.window}"]
 
-        # mark only the entry/exit trigger bars, then forward-fill so the position holds between them
-        raw = pd.Series(np.nan, index=out.index)
-        raw[rsi < self.buy_below] = 1.0
-        raw[rsi > self.exit_above] = 0.0
-        out["signal"] = raw.ffill().fillna(0.0).astype(int)
+        out["signal"] = trigger_hold_signal(out.index, rsi < self.buy_below, rsi > self.exit_above)
         return out
