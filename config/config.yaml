@@ -13,12 +13,31 @@ strategy:
   fast_ma: 20
   slow_ma: 50
 
+# strategy registry
+strategies:
+  - name: ma_crossover
+    params: {fast: 20, slow: 50}
+  - name: rsi_mean_reversion
+    params: {window: 14, buy_below: 30, exit_above: 50}
+  - name: donchian_breakout
+    params: {entry_window: 20, exit_window: 10}
+  - name: tsmom
+    params: {lookback: 90}
+  - name: buy_and_hold
+    params: {}
+
 # fast/slow combinations for parameter sweep
 sweep:
   fast_options: [10, 20, 30]
   slow_options: [50, 100, 150]
 
-#  off by default since it re-runs the strategy n_trials times 
+# walk-forward fold sizes (bars)
+walk_forward:
+  train_size: 365
+  test_size: 90
+  expanding: false
+
+# monte carlo configs
 monte_carlo:
   enabled: false
   n_trials: 2000
