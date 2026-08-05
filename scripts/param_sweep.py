@@ -1,51 +1,20 @@
 from __future__ import annotations
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common import build_backtester, build_provider, load_config
 
-import yaml
-
-from src.backtest.engine import Backtester
-from src.data.ccxt_provider import CCXTDataProvider
-from src.data.synthetic import SyntheticDataProvider
 from src.evaluation.metrics import PerformanceMetrics
 from src.preprocessing.cleaner import DataCleaner
 from src.preprocessing.features import FeatureEngineer
 from src.strategies.ma_crossover import MACrossoverStrategy
 
-CONFIG_PATH = Path("config/config.yaml")
-
-
-def _load_config() -> dict:
-    with open(CONFIG_PATH) as f:
-        return yaml.safe_load(f)
-
-
-def _fetch_data(config: dict):
-    data_cfg = config["data"]
-    provider = CCXTDataProvider(
-        symbol=data_cfg["symbol"], timeframe=data_cfg["timeframe"], limit=data_cfg["limit"]
-    )
-    try:
-        return provider.fetch()
-    except Exception:
-        return SyntheticDataProvider(n_periods=data_cfg["limit"]).fetch()
-
 
 def main() -> None:
-    config = _load_config()
+    config = load_config()
 
-    raw = _fetch_data(config)
+    raw = build_provider(config).fetch()
     df = FeatureEngineer().returns(DataCleaner().clean(raw))
 
-    backtest_cfg = config["backtest"]
-    backtester = Backtester(
-        fee=backtest_cfg["fee"],
-        initial_capital=backtest_cfg["initial_capital"],
-        slippage_bps=backtest_cfg.get("slippage_bps", 5.0),
-        min_holding_period=backtest_cfg.get("min_holding_period", 0),
-    )
+    backtester = build_backtester(config)
     metrics = PerformanceMetrics()
 
     sweep_cfg = config["sweep"]

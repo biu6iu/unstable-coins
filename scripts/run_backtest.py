@@ -1,17 +1,11 @@
 from __future__ import annotations
 import logging
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-import yaml
+from _common import build_backtester, build_provider, load_config
 
 from src.analysis.monte_carlo import MonteCarloAnalyzer
 from src.backtest.engine import Backtester
 from src.backtest.result import BacktestResult
-from src.data.ccxt_provider import CCXTDataProvider
-from src.data.synthetic import SyntheticDataProvider
 from src.evaluation.metrics import PerformanceMetrics
 from src.evaluation.plots import ReportPlotter
 from src.pipeline import Pipeline
@@ -26,41 +20,13 @@ from src.validation.walk_forward import WalkForwardValidator
 
 logger = logging.getLogger(__name__)
 
-CONFIG_PATH = Path("config/config.yaml")
-
-def _load_config() -> dict:
-    with open(CONFIG_PATH) as f:
-        return yaml.safe_load(f)
-
-
-def _build_provider(config: dict):
-    data_cfg = config["data"]
-    ccxt_provider = CCXTDataProvider(
-        symbol=data_cfg["symbol"],
-        timeframe=data_cfg["timeframe"],
-        limit=data_cfg["limit"],
-    )
-    try:
-        ccxt_provider.fetch() 
-        return ccxt_provider
-    except Exception as exc:
-        logger.warning("CCXT fetch failed (%s)", exc)
-        return SyntheticDataProvider(n_periods=data_cfg["limit"])
-
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
-    config = _load_config()
+    config = load_config()
 
-    provider = _build_provider(config)
-
-    backtest_cfg = config["backtest"]
-    backtester = Backtester(
-        fee=backtest_cfg["fee"],
-        initial_capital=backtest_cfg["initial_capital"],
-        slippage_bps=backtest_cfg.get("slippage_bps", 5.0),
-        min_holding_period=backtest_cfg.get("min_holding_period", 0),
-    )
+    provider = build_provider(config)
+    backtester = build_backtester(config)
 
     strategy_configs = config["strategies"]
     strategies = build_strategies(strategy_configs)
