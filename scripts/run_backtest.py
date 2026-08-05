@@ -6,7 +6,7 @@ from _common import build_backtester, build_provider, load_config
 from src.analysis.monte_carlo import MonteCarloAnalyzer
 from src.backtest.engine import Backtester
 from src.backtest.result import BacktestResult
-from src.evaluation.metrics import PerformanceMetrics
+from src.evaluation.metrics import PerformanceMetrics, format_table
 from src.evaluation.plots import ReportPlotter
 from src.pipeline import Pipeline
 from src.preprocessing.cleaner import DataCleaner
@@ -148,17 +148,7 @@ def _print_cost_impact_table(res: list[BacktestResult]) -> None:
             }
         )
 
-    widths = {c: max(len(c), *(len(f"{row[c]:.4f}" if c != "strategy" else row[c]) for row in rows)) for c in columns}
-    header = " | ".join(c.ljust(widths[c]) for c in columns)
-    print("\nCost impact (before/after fees + slippage):")
-    print(header)
-    print("-+-".join("-" * widths[c] for c in columns))
-    for row in rows:
-        cells = [
-            row["strategy"].ljust(widths["strategy"]),
-            *(f"{row[c]:.4f}".ljust(widths[c]) for c in columns[1:]),
-        ]
-        print(" | ".join(cells))
+    print(format_table(columns, rows, title="\nCost impact (before/after fees + slippage):"))
 
 
 def _print_combined_table(plain_res: list[BacktestResult], wf_res: list[BacktestResult], metrics: PerformanceMetrics) -> None:
@@ -170,16 +160,7 @@ def _print_combined_table(plain_res: list[BacktestResult], wf_res: list[Backtest
             row["mode"] = mode
             rows.append(row)
 
-    def _fmt(value) -> str:
-        return f"{value:.4f}" if isinstance(value, float) else str(value)
-
-    widths = {c: max(len(c), *(len(_fmt(row[c])) for row in rows)) for c in columns}
-    header = " | ".join(c.ljust(widths[c]) for c in columns)
-    print("\nCombined comparison (plain backtest vs walk-forward out-of-sample):")
-    print(header)
-    print("-+-".join("-" * widths[c] for c in columns))
-    for row in rows:
-        print(" | ".join(_fmt(row[c]).ljust(widths[c]) for c in columns))
+    print(format_table(columns, rows, title="\nCombined comparison (plain backtest vs walk-forward out-of-sample):"))
 
 
 if __name__ == "__main__":

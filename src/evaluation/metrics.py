@@ -56,19 +56,7 @@ class PerformanceMetrics:
         """Print and return a formatted side-by-side table for multiple
         strategies, each computed with `compute`."""
         rows = [self.compute(result) for result in results]
-
-        widths = {
-            column: max(len(column), *(len(_format(row[column])) for row in rows))
-            for column in _COLUMNS
-        }
-        header = " | ".join(column.ljust(widths[column]) for column in _COLUMNS)
-        separator = "-+-".join("-" * widths[column] for column in _COLUMNS)
-        body = [
-            " | ".join(_format(row[column]).ljust(widths[column]) for column in _COLUMNS)
-            for row in rows
-        ]
-
-        table = "\n".join([header, separator, *body])
+        table = format_table(_COLUMNS, rows)
         print(table)
         return table
 
@@ -77,3 +65,19 @@ def _format(value) -> str:
     if isinstance(value, float):
         return f"{value:.4f}"
     return str(value)
+
+
+def format_table(columns: list[str], rows: list[dict], title: str | None = None) -> str:
+    """Render `rows` (dicts keyed by `columns`) as an aligned text table; floats shown to 4dp"""
+    widths = {
+        column: max(len(column), *(len(_format(row[column])) for row in rows))
+        for column in columns
+    }
+    header = " | ".join(column.ljust(widths[column]) for column in columns)
+    separator = "-+-".join("-" * widths[column] for column in columns)
+    body = [
+        " | ".join(_format(row[column]).ljust(widths[column]) for column in columns)
+        for row in rows
+    ]
+    lines = ([title] if title else []) + [header, separator, *body]
+    return "\n".join(lines)
