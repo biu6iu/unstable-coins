@@ -1,8 +1,7 @@
-"""Shared CLI setup for scripts/run_backtest.py and scripts/param_sweep.py"""
-
 from __future__ import annotations
 import logging
 import sys
+from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -17,6 +16,31 @@ from src.data.synthetic import SyntheticDataProvider
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path("config/config.yaml")
+
+
+class _Tee:
+    """Writes to multiple streams at once, so stdout can be mirrored to a file"""
+
+    def __init__(self, *streams) -> None:
+        self._streams = streams
+
+    def write(self, data: str) -> int:
+        for stream in self._streams:
+            stream.write(data)
+        return len(data)
+
+    def flush(self) -> None:
+        for stream in self._streams:
+            stream.flush()
+
+
+@contextmanager
+def tee_stdout_to_file(path: Path | str):
+    """Mirror everything printed to stdout into `path` as well as the terminal, so a run's full report output is saved alongside being shown live"""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f, redirect_stdout(_Tee(sys.stdout, f)):
+        yield
 
 
 def load_config() -> dict:

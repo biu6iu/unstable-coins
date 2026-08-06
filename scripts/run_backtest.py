@@ -1,14 +1,20 @@
 from __future__ import annotations
 import logging
+import re
+from dataclasses import asdict
+from pathlib import Path
 
-from _common import build_backtester, build_provider, load_config
+from _common import build_backtester, build_provider, load_config, tee_stdout_to_file
+
+import pandas as pd
 
 from src.analysis.monte_carlo import MonteCarloAnalyzer
 from src.backtest.engine import Backtester
 from src.backtest.result import BacktestResult
 from src.data.base import DataProvider
 from src.evaluation.metrics import PerformanceMetrics, format_table
-from src.evaluation.plots import ReportPlotter
+from src.evaluation.plots import DEFAULT_REPORTS_DIR, ReportPlotter
+from src.evaluation.trades import extract_trades, trade_summary
 from src.pipeline import Pipeline
 from src.preprocessing.cleaner import DataCleaner
 from src.preprocessing.features import FeatureEngineer
@@ -27,21 +33,27 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     config = load_config()
 
-    provider = build_provider(config)
-    backtester = build_backtester(config)
-    strategy_configs = config["strategies"]
-    strategies, ensemble = _build_strategies(strategy_configs)
+    # mirrors every table/report this run prints to reports/analysis_summary.txt,
+    # so evaluation output survives past the terminal without changing any of the
+    # analysis logic itself
+    with tee_stdout_to_file(DEFAULT_REPORTS_DIR / "analysis_summary.txt"):
+        provider = build_provider(config)
+        backtester = build_backtester(config)
+        strategy_configs = config["strategies"]
+        strategies, ensemble = _build_strategies(strategy_configs)
 
-    metrics = PerformanceMetrics()
-    monte_carlo = _build_monte_carlo(config)
-    pipeline = _build_pipeline(provider, backtester, strategies, metrics, monte_carlo)
+        metrics = PerformanceMetrics()
+        monte_carlo = _build_monte_carlo(config)
+        pipeline = _build_pipeline(provider, backtester, strategies, metrics, monte_carlo)
 
-    plain_res = pipeline.run(plot_filename="strategy_comparison.png")
-    _print_cost_impact_table(plain_res)
-    _report_ensemble_diagnostics(ensemble, plain_res, monte_carlo)
+        plain_res = pipeline.run(plot_filename="strategy_comparison.png")
+        _print_cost_impact_table(plain_res)
+        _print_trade_summary_table(plain_res)
+        _save_trade_logs(plain_res, DEFAULT_REPORTS_DIR)
+        _report_ensemble_diagnostics(ensemble, plain_res, monte_carlo)
 
-    wf_res = _run_walk_forward(provider, backtester, metrics, strategy_configs, config["walk_forward"])
-    _print_combined_table(plain_res, wf_res, metrics)
+        wf_res = _run_walk_forward(provider, backtester, metrics, strategy_configs, config["walk_forward"])
+        _print_combined_table(plain_res, wf_res, metrics)
 
 
 def _build_strategies(strategy_configs: list[dict]) -> tuple[list[Strategy], VotingStrategy]:
@@ -174,6 +186,25 @@ def _print_cost_impact_table(res: list[BacktestResult]) -> None:
         )
 
     print(format_table(columns, rows, title="\nCost impact (before/after fees + slippage):"))
+
+
+def _print_trade_summary_table(res: list[BacktestResult]) -> None:
+    columns = ["strategy", "num_trades", "win_rate", "avg_win", "avg_loss", "profit_factor", "total_pnl_dollars"]
+    rows = []
+    for result in res:
+        summary = trade_summary(extract_trades(result))
+        rows.append({"strategy": result.strategy_name, **{c: summary[c] for c in columns[1:]}})
+
+    print(format_table(columns, rows, title="\nPer-trade P/L summary:"))
+
+
+def _save_trade_logs(res: list[BacktestResult], output_dir: Path) -> None:
+    """Write each strategy's full closed-trade log to a CSV, for deeper offline analysis"""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for result in res:
+        trades = extract_trades(result)
+        filename = re.sub(r"[^A-Za-z0-9]+", "_", result.strategy_name).strip("_") + "_trades.csv"
+        pd.DataFrame([asdict(t) for t in trades]).to_csv(output_dir / filename, index=False)
 
 
 def _print_combined_table(plain_res: list[BacktestResult], wf_res: list[BacktestResult], metrics: PerformanceMetrics) -> None:
