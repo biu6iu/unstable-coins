@@ -17,8 +17,13 @@ def _percentile_summary(values: np.ndarray) -> dict[int, float]:
 @dataclass
 class MonteCarloResult:
     """
-    Distributions of final equity and max drawdown from resampled trials of one strategy's daily returns, 
+    Distributions of final equity and max drawdown from resampled trials of one strategy's daily returns,
     compared with historical values.
+
+    sample_paths is a small slice of the SAME equity_paths matrix used to
+    derive final_equity/max_drawdown (not a separate re-roll), kept for
+    spaghetti-plot visualisation of what the simulated trials actually
+    look like over time, not just their endpoint/trough distributions.
     """
 
     final_equity: np.ndarray
@@ -27,6 +32,8 @@ class MonteCarloResult:
     actual_max_drawdown: float
     initial_capital: float
     block_length: int
+    sample_paths: np.ndarray
+    dates: pd.DatetimeIndex
 
     def final_equity_percentiles(self) -> dict[int, float]:
         return _percentile_summary(self.final_equity)
@@ -97,7 +104,9 @@ class MonteCarloAnalyzer:
         self.block_length = block_length
         self.noise_std = noise_std
 
-    def bootstrap(self, result: BacktestResult, block_length: int | None = None) -> MonteCarloResult:
+    def bootstrap(
+        self, result: BacktestResult, block_length: int | None = None, n_sample_paths: int = 100
+    ) -> MonteCarloResult:
         """Resample `result`'s daily strategy returns to rebuild an equity curve per trial"""
         block_length = self.block_length if block_length is None else block_length
         returns = result.strategy_returns.to_numpy()
@@ -121,7 +130,9 @@ class MonteCarloAnalyzer:
             actual_final_equity=float(result.equity_curve.iloc[-1]),
             actual_max_drawdown=float(actual_max_drawdown),
             initial_capital=starting_equity,
-            block_length=block_length
+            block_length=block_length,
+            sample_paths=equity_paths[: min(n_sample_paths, self.n_trials)],
+            dates=result.equity_curve.index,
         )
 
     def noise_robustness(self, df: pd.DataFrame, strategy: Strategy, backtester: Backtester, noise_std: float | None = None) -> NoiseRobustnessResult:

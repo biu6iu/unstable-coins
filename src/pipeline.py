@@ -33,7 +33,12 @@ class Pipeline:
         self.plotter = plotter
         self.monte_carlo = monte_carlo
 
-    def run(self, plot_filename: str = "report.png", monte_carlo_filename: str = "monte_carlo.png") -> list[BacktestResult]:
+    def run(
+        self,
+        plot_filename: str = "report.png",
+        monte_carlo_filename: str = "monte_carlo.png",
+        monte_carlo_paths_filename: str = "monte_carlo_paths.png",
+    ) -> list[BacktestResult]:
         raw = self.provider.fetch()
         clean = self.cleaner.clean(raw)
         featured = self.engineer.returns(clean)
@@ -43,13 +48,16 @@ class Pipeline:
         self.plotter.plot(results[0], results[-1], filename=plot_filename)
         self.metrics.compare(results)
 
-        # Monte Carlo analysis is opt-in 
+        # Monte Carlo analysis is opt-in
         if self.monte_carlo is not None:
             primary = results[0]
             mc_result = self.monte_carlo.bootstrap(primary)
             self.monte_carlo.print_bootstrap_report(mc_result, label=primary.strategy_name)
             self.plotter.plot_monte_carlo(
                 mc_result, label=primary.strategy_name, filename=monte_carlo_filename
+            )
+            self.plotter.plot_monte_carlo_paths(
+                mc_result, primary.equity_curve, label=primary.strategy_name, filename=monte_carlo_paths_filename
             )
 
             noise_result = self.monte_carlo.noise_robustness(

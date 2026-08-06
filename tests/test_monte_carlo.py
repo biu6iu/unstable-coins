@@ -93,6 +93,35 @@ def test_constant_negative_return_always_finishes_below_initial_capital():
     assert mc.prob_below_initial_capital() == pytest.approx(1.0)
 
 
+def test_sample_paths_shape_and_dates_match_result():
+    result = _make_result([0.001] * 50)
+    analyzer = MonteCarloAnalyzer(n_trials=30, seed=1, block_length=5)
+
+    mc = analyzer.bootstrap(result, n_sample_paths=10)
+
+    assert mc.sample_paths.shape == (10, 50)
+    pd.testing.assert_index_equal(mc.dates, result.equity_curve.index)
+
+
+def test_sample_paths_capped_at_n_trials_when_n_sample_paths_is_larger():
+    result = _make_result([0.001] * 20)
+    analyzer = MonteCarloAnalyzer(n_trials=5, seed=1, block_length=5)
+
+    mc = analyzer.bootstrap(result, n_sample_paths=100)
+
+    assert mc.sample_paths.shape == (5, 20)
+
+
+def test_sample_paths_identical_under_constant_returns():
+    result = _make_result([0.01] * 40)
+    analyzer = MonteCarloAnalyzer(n_trials=200, seed=1, block_length=5)
+
+    mc = analyzer.bootstrap(result, n_sample_paths=50)
+
+    for path in mc.sample_paths:
+        assert np.allclose(path, mc.sample_paths[0])
+
+
 def test_percentiles_are_monotonically_ordered():
     rng = np.random.default_rng(3)
     returns = rng.normal(loc=0.0005, scale=0.02, size=200)

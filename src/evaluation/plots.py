@@ -2,9 +2,10 @@ from __future__ import annotations
 from pathlib import Path
 import matplotlib
 
-matplotlib.use("Agg") 
+matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
+import pandas as pd
 
 from src.analysis.monte_carlo import MonteCarloResult
 from src.backtest.result import BacktestResult
@@ -52,6 +53,30 @@ class ReportPlotter:
         ax.plot(benchmark.equity_curve.index, benchmark.equity_curve, label=benchmark.strategy_name)
         ax.set_title("Equity Curve: Strategy vs Benchmark")
         ax.legend(loc="best")
+
+    def plot_monte_carlo_paths(
+        self,
+        mc_result: MonteCarloResult,
+        actual_equity: pd.Series,
+        label: str = "",
+        filename: str = "monte_carlo_paths.png",
+    ) -> Path:
+        """Spaghetti plot: a sample of simulated equity paths (faint) with the actual historical equity curve on top"""
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        for path in mc_result.sample_paths:
+            ax.plot(mc_result.dates, path, color="steelblue", alpha=0.08, linewidth=0.8)
+        ax.plot(actual_equity.index, actual_equity, color="black", linewidth=1.5, label="Actual")
+
+        ax.set_title(f"{label} - Monte Carlo Simulated Equity Paths".strip(" -"))
+        ax.legend(loc="best")
+
+        fig.tight_layout()
+        output_path = self.output_dir / filename
+        fig.savefig(output_path)
+        plt.close(fig)
+        return output_path
 
     def plot_monte_carlo(self, mc_result: MonteCarloResult, label: str = "", filename: str = "monte_carlo.png") -> Path:
         self.output_dir.mkdir(parents=True, exist_ok=True)
