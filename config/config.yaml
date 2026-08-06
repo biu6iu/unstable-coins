@@ -43,3 +43,12 @@ monte_carlo:
   n_trials: 2000
   block_length: 20
   noise_std: 0.001
+
+# paper trading (read-only market data; no orders, no API keys, no real funds)
+paper_trading:
+  strategy_name: ma_crossover     # must match a name: entry under strategies: above
+  log_path: logs/paper_trades.jsonl
+  poll_interval_seconds: null     # null -> derive from data.timeframe
+  max_retries: 5
+  retry_base_delay_seconds: 2.0
+  retry_max_delay_seconds: 60.0

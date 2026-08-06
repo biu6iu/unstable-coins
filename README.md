@@ -72,3 +72,35 @@ strategy families, since each is a bet on different market behaviour:
    strategy on many small random perturbations of the price series to
    reveal how much a strategy's edge depends on the exact historical
    path.
+
+## Paper Trading
+
+**Read-only.** Trading is simulated bookkeeping
+written to a log file, useful for watching a strategy's behaviour on
+live data before (if ever) trusting it further.
+
+Run it with:
+
+```
+python scripts/paper_trade.py
+```
+
+It polls the exchange on a schedule matching `config.yaml`'s
+`data.timeframe`, and recomputes the strategy configured under `paper_trading.strategy_name` 
+over the full history seen so far, using the exact same `Backtester` as the research backtests
+above. Every decision is appended as a JSON line to
+`paper_trading.log_path` (default `logs/paper_trades.jsonl`), and a
+status line is printed on every poll. Network failures retry with
+exponential backoff and never crash the loop.
+
+After a paper trading session has run for a while, reconcile the
+logged equity path against a retrospective historical backtest of the
+same period:
+
+```
+python scripts/reconcile_paper_trade.py logs/paper_trades.jsonl
+```
+
+Divergences between the two paths reveal what the backtest abstraction
+hides - partial bars, exchange data revisions, and poll-timing gaps -
+not a bug in the backtest engine itself.

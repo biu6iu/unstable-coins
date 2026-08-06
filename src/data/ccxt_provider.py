@@ -1,8 +1,5 @@
-"""Live OHLCV data from a real exchange via ccxt, with local caching"""
-
 from __future__ import annotations
 from pathlib import Path
-
 import ccxt
 import pandas as pd
 
@@ -21,13 +18,17 @@ class CCXTDataProvider(DataProvider):
         exchange_id: str = "binance",
         cache_dir: Path | str = DEFAULT_CACHE_DIR,
         use_cache: bool = True,
+        since: pd.Timestamp | None = None,
     ) -> None:
         self.symbol = symbol
         self.timeframe = timeframe
         self.limit = limit
         self.exchange_id = exchange_id
         self.cache_dir = Path(cache_dir)
-        self.use_cache = use_cache
+
+        # a `since`-bounded fetch targets a specific historical range which the plain symbol/timeframe/limit cache key doesn't capture
+        self.use_cache = use_cache and since is None
+        self.since = since
 
     def _cache_path(self) -> Path:
         safe_symbol = self.symbol.replace("/", "-")
@@ -42,10 +43,11 @@ class CCXTDataProvider(DataProvider):
             validate(df)
             return df
 
-        # fetch data and transform into a valid df 
+        # fetch data and transform into a valid df
         exchange_class = getattr(ccxt, self.exchange_id)
-        exchange = exchange_class() 
-        raw = exchange.fetch_ohlcv(self.symbol, timeframe=self.timeframe, limit=self.limit)
+        exchange = exchange_class()
+        since_ms = int(self.since.timestamp() * 1000) if self.since is not None else None
+        raw = exchange.fetch_ohlcv(self.symbol, timeframe=self.timeframe, since=since_ms, limit=self.limit)
 
         df = pd.DataFrame(raw, columns=["timestamp", "open", "high", "low", "close", "volume"])
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
