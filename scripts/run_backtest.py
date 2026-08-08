@@ -1,4 +1,5 @@
 from __future__ import annotations
+import itertools
 import logging
 import re
 from dataclasses import asdict
@@ -33,9 +34,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     config = load_config()
 
-    # mirrors every table/report this run prints to reports/analysis_summary.txt,
-    # so evaluation output survives past the terminal without changing any of the
-    # analysis logic itself
+    # prints to reports/analysis_summary.txt
     with tee_stdout_to_file(DEFAULT_REPORTS_DIR / "analysis_summary.txt"):
         provider = build_provider(config)
         backtester = build_backtester(config)
@@ -52,20 +51,23 @@ def main() -> None:
         _save_trade_logs(plain_res, DEFAULT_REPORTS_DIR)
         _report_ensemble_diagnostics(ensemble, plain_res, monte_carlo)
 
-        wf_res = _run_walk_forward(provider, backtester, metrics, strategy_configs, config["walk_forward"])
+        wf_res = _run_walk_forward(
+            provider,
+            backtester,
+            metrics,
+            strategy_configs,
+            config["walk_forward"],
+            config.get("param_grids", {}),
+        )
         _print_combined_table(plain_res, wf_res, metrics)
 
 
 def _build_strategies(strategy_configs: list[dict]) -> tuple[list[Strategy], VotingStrategy]:
     """
-    Build the config/registry-driven strategies, plus one hand-built example
-    ensemble (trend-following + mean reversion + breakout, so members
-    win/lose in different regimes rather than restating the same bet three
-    times - see the correlation diagnostic in _report_ensemble_diagnostics).
-    Inserted before buy_and_hold so buy_and_hold stays the last/benchmark
-    entry the pipeline plots against.
+    Build the config/registry-driven strategies
     """
     strategies = build_strategies(strategy_configs)
+
     ensemble = VotingStrategy(
         [
             MACrossoverStrategy(fast=20, slow=50),
@@ -135,12 +137,48 @@ def _report_ensemble_diagnostics(ensemble: VotingStrategy, plain_res: list[Backt
         monte_carlo.print_drawdown_comparison(comparisons)
 
 
+_GRID_CONSTRAINTS: dict[str, tuple[tuple[str, str], ...]] = {
+    "ma_crossover": (("fast", "slow"),),
+    "rsi_mean_reversion": (("buy_below", "exit_above"),),
+    "donchian_breakout": (("exit_window", "entry_window"),),
+}
+
+
+def _is_valid_combo(name: str, params: dict) -> bool:
+    """Constraints only apply when the grid actually varies both sides of a pair"""
+    return all(
+        params[a] < params[b]
+        for a, b in _GRID_CONSTRAINTS.get(name, ())
+        if a in params and b in params
+    )
+
+
+def _param_grid(name: str, grid_cfg: dict, params: dict) -> list[dict]:
+    """
+    Expand a strategy's declared option lists into every valid combination.
+    """
+    options = grid_cfg.get(name)
+    if not options:
+        return [params]
+
+    keys = list(options)
+    combos = [
+        {**params, **dict(zip(keys, values))}
+        for values in itertools.product(*(options[k] for k in keys))
+    ]
+    valid = [c for c in combos if _is_valid_combo(name, c)]
+    if not valid:
+        raise ValueError(f"param_grids.{name} expands to no valid combinations")
+    return valid
+
+
 def _run_walk_forward(
     provider: DataProvider,
     backtester: Backtester,
     metrics: PerformanceMetrics,
     strategy_configs: list[dict],
     wf_cfg: dict,
+    grid_cfg: dict,
 ) -> list[BacktestResult]:
     """Run every registered strategy through WalkForwardValidator"""
     # provider.fetch() is a cache hit so this reconstructs the exact df pipeline used internally without a second network round-trip
@@ -157,12 +195,12 @@ def _run_walk_forward(
     stitched_res = []
     for entry in strategy_configs:
         strategy_cls = STRATEGY_REGISTRY[entry["name"]]
-        params = entry.get("params", {})
-        print(f"\nWalk-forward folds: {entry['name']}")
+        param_grid = _param_grid(entry["name"], grid_cfg, entry.get("params", {}))
+        print(f"\nWalk-forward folds: {entry['name']} ({len(param_grid)} candidate(s) per fold)")
         wf_result = validator.run(
             df,
             strategy_factory=strategy_cls,
-            param_grid=[params],
+            param_grid=param_grid,
             selection_metric="sharpe",
         )
         stitched_res.append(wf_result.stitched_result)

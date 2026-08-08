@@ -26,6 +26,22 @@ strategies:
   - name: buy_and_hold
     params: {}
 
+
+# Candidate parameter values the walk-forward validator chooses between
+param_grids:
+  ma_crossover:
+    fast: [10, 15, 20, 25]
+    slow: [40, 50, 75, 100]
+  rsi_mean_reversion:
+    window: [10, 14, 21]
+    buy_below: [20, 25, 30]
+    exit_above: [50, 60, 70]
+  donchian_breakout:
+    entry_window: [15, 20, 30, 40]
+    exit_window: [7, 10, 15]
+  tsmom:
+    lookback: [30, 60, 90, 120]
+
 # fast/slow combinations for parameter sweep
 sweep:
   fast_options: [10, 20, 30]
