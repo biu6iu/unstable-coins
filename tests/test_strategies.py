@@ -278,3 +278,39 @@ def test_registry_builds_soft_voting_ensemble_from_config_entry():
         "RSIMeanReversion(14,30.0,50.0)",
         "DonchianBreakout(20,10)",
     ]
+
+
+def test_registry_soft_voting_weights_derived_from_member_sharpes():
+    """Weights should track measured edge: clipped at zero, normalised, in member order"""
+    strategy = build_strategies(
+        [{"name": "soft_voting_ensemble", "params": {"member_sharpes": [1.0, -0.5, 3.0]}}]
+    )[0]
+    assert strategy.weights == pytest.approx([0.25, 0.0, 0.75])
+
+
+def test_registry_soft_voting_falls_back_to_uniform_when_no_member_has_positive_sharpe():
+    """All-negative Sharpes would normalise a zero vector; uniform is the honest default"""
+    strategy = build_strategies(
+        [{"name": "soft_voting_ensemble", "params": {"member_sharpes": [-0.9, -0.7, -0.3]}}]
+    )[0]
+    assert strategy.weights is None
+
+
+def test_registry_soft_voting_explicit_weights_override_member_sharpes():
+    strategy = build_strategies(
+        [
+            {
+                "name": "soft_voting_ensemble",
+                "params": {"member_sharpes": [1.0, 2.0, 3.0], "weights": [1.0, 1.0, 1.0]},
+            }
+        ]
+    )[0]
+    assert strategy.weights == [1.0, 1.0, 1.0]
+
+
+def test_registry_soft_voting_rsi_window_is_configurable():
+    """The mean-reversion member's RSI window is walk-forward selected, so it must be reachable from config"""
+    strategy = build_strategies(
+        [{"name": "soft_voting_ensemble", "params": {"rsi_window": 10, "buy_below": 20}}]
+    )[0]
+    assert strategy.strategies[1].name == "RSIMeanReversion(10,20,50.0)"

@@ -23,6 +23,7 @@ from src.strategies.base import Strategy
 from src.strategies.ensemble import VotingStrategy, print_correlation_matrix
 from src.strategies.ma_crossover import MACrossoverStrategy
 from src.strategies.registry import STRATEGY_REGISTRY, build_strategies
+from src.strategies.rsi_filter import RSIFilterStrategy
 from src.strategies.rsi_mean_reversion import RSIMeanReversionStrategy
 from src.strategies.volatility_breakout import DonchianBreakoutStrategy
 from src.validation.walk_forward import WalkForwardValidator
@@ -65,8 +66,8 @@ def main() -> None:
 def build_hard_voting_ensemble() -> VotingStrategy:
     return VotingStrategy(
         [
-            MACrossoverStrategy(fast=20, slow=50),
-            RSIMeanReversionStrategy(window=14, buy_below=30, exit_above=50),
+            RSIFilterStrategy(MACrossoverStrategy(fast=20, slow=50), rsi_window=14, rsi_overbought=70.0),
+            RSIMeanReversionStrategy(window=10, buy_below=20, exit_above=50),
             DonchianBreakoutStrategy(entry_window=20, exit_window=10),
         ],
         k=2,

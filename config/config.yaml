@@ -14,15 +14,24 @@ strategies:
   - name: ma_crossover
     params: {fast: 20, slow: 50}
   - name: rsi_mean_reversion
-    params: {window: 14, buy_below: 30, exit_above: 50}
+    params: {window: 10, buy_below: 20, exit_above: 50}
   - name: donchian_breakout
     params: {entry_window: 20, exit_window: 10}
   - name: tsmom
-    params: {lookback: 90}
+    params: {lookback: 60}
   - name: rsi_filtered_crossover
     params: {fast: 20, slow: 50, rsi_window: 14, rsi_overbought: 70.0}
   - name: soft_voting_ensemble
-    params: {fast: 20, slow: 50, buy_below: 30, exit_above: 50, entry_window: 20, exit_window: 10}
+    # member_sharpes are the members own walk-forward sharpes in this order: MACrossover, RSIMeanReversion, DonchianBreakout
+    params:
+      fast: 20
+      slow: 50
+      rsi_window: 10
+      buy_below: 20
+      exit_above: 50
+      entry_window: 20
+      exit_window: 10
+      member_sharpes: [-0.9580, -0.6936, -0.2855]
   - name: buy_and_hold
     params: {}
 

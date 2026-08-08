@@ -26,20 +26,35 @@ def _build_rsi_filtered_crossover(
     )
 
 
+def sharpe_weights(member_sharpes: list[float]) -> list[float] | None:
+    """
+    Turn measured member Sharpes into soft-voting weights
+    """
+    clipped = [max(sharpe, 0.0) for sharpe in member_sharpes]
+    total = sum(clipped)
+    if total <= 0:
+        return None
+    return [weight / total for weight in clipped]
+
+
 def _build_soft_voting_ensemble(
     fast: int = 20,
     slow: int = 50,
+    rsi_window: int = 14,
     buy_below: float = 30.0,
     exit_above: float = 50.0,
     entry_window: int = 20,
     exit_window: int = 10,
-    weights: list[float] | None = None,
+    member_sharpes: list[float] | None = None,
+    weights: list[float] | None = None
 ) -> SoftVotingStrategy:
-    """Soft-voting counterpart to the hard-voting ensemble in scripts/run_backtest.py, same three members"""
+    if weights is None and member_sharpes is not None:
+        weights = sharpe_weights(member_sharpes)
+
     return SoftVotingStrategy(
         [
             MACrossoverStrategy(fast=fast, slow=slow),
-            RSIMeanReversionStrategy(buy_below=buy_below, exit_above=exit_above),
+            RSIMeanReversionStrategy(window=rsi_window, buy_below=buy_below, exit_above=exit_above),
             DonchianBreakoutStrategy(entry_window=entry_window, exit_window=exit_window),
         ],
         weights=weights,
