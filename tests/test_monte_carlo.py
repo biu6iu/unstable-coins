@@ -10,6 +10,7 @@ from src.analysis.monte_carlo import (
 )
 from src.backtest.engine import Backtester
 from src.backtest.result import BacktestResult
+from src.evaluation.metrics import sharpe_ratio
 from src.strategies.base import Strategy
 
 
@@ -170,3 +171,41 @@ def test_noise_perturbation_preserves_ohlc_length_and_columns():
     assert len(perturbed) == len(df)
     # volume must be left untouched by the price perturbation
     pd.testing.assert_series_equal(perturbed["volume"], df["volume"])
+
+
+def test_bootstrapped_sharpe_matches_metrics_sharpe_when_trials_reproduce_the_history():
+    # block_length == len(returns) leaves exactly one legal block start, so every
+    # trial is the original series. Each trial's Sharpe must then equal
+    # metrics.sharpe_ratio's: a bootstrapped Sharpe computed with a different
+    # ddof would not be comparable with the headline number it brackets.
+    rng = np.random.default_rng(1)
+    result = _make_result(rng.normal(0.001, 0.02, size=60))
+    mc = MonteCarloAnalyzer(n_trials=25, block_length=60).bootstrap(result)
+
+    expected = sharpe_ratio(result.strategy_returns)
+    assert mc.actual_sharpe == pytest.approx(expected)
+    assert mc.sharpe == pytest.approx(np.full(25, expected))
+
+
+def test_sharpe_percentiles_are_monotonically_ordered_and_bracket_the_actual():
+    rng = np.random.default_rng(0)
+    result = _make_result(rng.normal(0.001, 0.02, size=250))
+    mc = MonteCarloAnalyzer(n_trials=500, block_length=20).bootstrap(result)
+
+    percentiles = mc.sharpe_percentiles()
+    assert [percentiles[p] for p in (5, 25, 50, 75, 95)] == sorted(
+        percentiles[p] for p in (5, 25, 50, 75, 95)
+    )
+    assert percentiles[5] < mc.actual_sharpe < percentiles[95]
+
+
+def test_sharpe_percentiles_survive_trials_with_no_variation():
+    # A strategy that never moved has no Sharpe (nan), and nan trials must not
+    # blank the percentile summary for the trials that do have one.
+    result = _make_result([0.0] * 30)
+    mc = MonteCarloAnalyzer(n_trials=20, block_length=1).bootstrap(result)
+
+    assert np.isnan(mc.actual_sharpe)
+    assert np.isnan(mc.sharpe).all()
+    with pytest.warns(RuntimeWarning, match="All-NaN"):
+        assert np.isnan(mc.sharpe_percentiles()[50])

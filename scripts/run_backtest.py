@@ -2,6 +2,7 @@ from __future__ import annotations
 import itertools
 import logging
 import re
+from collections import Counter
 from dataclasses import asdict
 from pathlib import Path
 
@@ -51,6 +52,7 @@ def main() -> None:
         _print_trade_summary_table(plain_res)
         _save_trade_logs(plain_res, DEFAULT_REPORTS_DIR)
         _report_ensemble_diagnostics(ensemble, plain_res, monte_carlo)
+        _report_best_strategy_robustness(plain_res, metrics, monte_carlo)
 
         wf_res = _run_walk_forward(
             provider,
@@ -142,6 +144,31 @@ def _report_ensemble_diagnostics(ensemble: VotingStrategy, plain_res: list[Backt
         monte_carlo.print_drawdown_comparison(comparisons)
 
 
+def _report_best_strategy_robustness(
+    plain_res: list[BacktestResult],
+    metrics: PerformanceMetrics,
+    monte_carlo: MonteCarloAnalyzer | None,
+) -> None:
+    """
+    Bootstrap the highest-Sharpe strategy specifically.
+
+    The Pipeline's own Monte Carlo section covers strategies[0], which is just
+    whichever strategy config lists first - not the one whose headline number a
+    reader will quote. Block bootstrap only measures sampling uncertainty around
+    this history, so it can say "that Sharpe is indistinguishable from its
+    neighbours"; it cannot say the strategy generalises. That claim belongs to
+    the walk-forward column.
+    """
+    if monte_carlo is None:
+        return
+
+    scored = [(metrics.compute(result)["sharpe"], result) for result in plain_res]
+    best_sharpe, best = max(scored, key=lambda pair: (pd.notna(pair[0]), pair[0]))
+
+    print(f"\nRobustness check on the best plain-backtest Sharpe ({best_sharpe:.4f}):")
+    monte_carlo.print_bootstrap_report(monte_carlo.bootstrap(best), label=best.strategy_name)
+
+
 _GRID_CONSTRAINTS: dict[str, tuple[tuple[str, str], ...]] = {
     "ma_crossover": (("fast", "slow"),),
     "rsi_mean_reversion": (("buy_below", "exit_above"),),
@@ -208,8 +235,23 @@ def _run_walk_forward(
             param_grid=param_grid,
             selection_metric="sharpe",
         )
+        _print_parameter_stability(wf_result.fold_selections)
         stitched_res.append(wf_result.stitched_result)
     return stitched_res
+
+
+def _print_parameter_stability(fold_selections: list[dict]) -> None:
+    """
+    Summarise how often the folds agreed on a parameter set 
+    """
+    # keyed on the rendered dict rather than its items
+    counts = Counter(str(dict(sorted(params.items()))) for params in fold_selections)
+    modal, agreed = counts.most_common(1)[0]
+    verdict = "stable" if agreed > len(fold_selections) / 2 else "UNSTABLE"
+    print(
+        f"  parameter stability: {agreed}/{len(fold_selections)} folds chose "
+        f"{modal} ({len(counts)} distinct choices) -> {verdict}"
+    )
 
 
 def _print_cost_impact_table(res: list[BacktestResult]) -> None:

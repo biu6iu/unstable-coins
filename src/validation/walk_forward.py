@@ -59,7 +59,7 @@ class WalkForwardValidator:
             train_df = df.iloc[train_start:train_end]
             test_df = df.iloc[test_start:test_end]
 
-            best_params, best_score = None, float("-inf")
+            best_params, best_score = param_grid[0], float("-inf")
             for params in param_grid:
                 candidate = self.backtester.run(train_df, strategy_factory(**params))
                 score = self.metrics.compute(candidate)[selection_metric]

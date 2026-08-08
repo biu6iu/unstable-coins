@@ -5,13 +5,14 @@ import pandas as pd
 
 from src.backtest.engine import Backtester
 from src.backtest.result import BacktestResult
-from src.evaluation.metrics import max_drawdown
+from src.evaluation.metrics import ANNUALISATION_FACTOR, max_drawdown, sharpe_ratio
 from src.strategies.base import Strategy
 
 PERCENTILES = (5, 25, 50, 75, 95)
 
 def _percentile_summary(values: np.ndarray) -> dict[int, float]:
-    return {p: float(np.percentile(values, p)) for p in PERCENTILES}
+    """nan-aware: a trial whose resampled returns never vary has no Sharpe, and must not blank the whole summary"""
+    return {p: float(np.nanpercentile(values, p)) for p in PERCENTILES}
 
 
 @dataclass
@@ -28,8 +29,10 @@ class MonteCarloResult:
 
     final_equity: np.ndarray
     max_drawdown: np.ndarray
+    sharpe: np.ndarray
     actual_final_equity: float
     actual_max_drawdown: float
+    actual_sharpe: float
     initial_capital: float
     block_length: int
     sample_paths: np.ndarray
@@ -40,6 +43,14 @@ class MonteCarloResult:
 
     def max_drawdown_percentiles(self) -> dict[int, float]:
         return _percentile_summary(self.max_drawdown)
+
+    def sharpe_percentiles(self) -> dict[int, float]:
+        """
+        Sampling distribution of the headline Sharpe. Two strategies whose p5-p95
+        bands overlap heavily are not distinguishable on this one history, however
+        far apart their point estimates sit.
+        """
+        return _percentile_summary(self.sharpe)
 
     def prob_below_initial_capital(self) -> float:
         return float(np.mean(self.final_equity < self.initial_capital))
@@ -122,13 +133,24 @@ class MonteCarloAnalyzer:
         running_max = np.maximum.accumulate(equity_paths, axis=1)
         trial_max_drawdown = (equity_paths / running_max - 1).min(axis=1)
 
+        # ddof=1 to match pandas' std
+        trial_std = sampled_returns.std(axis=1, ddof=1)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            trial_sharpe = np.where(
+                trial_std > 0,
+                sampled_returns.mean(axis=1) / trial_std * np.sqrt(ANNUALISATION_FACTOR),
+                np.nan,
+            )
+
         actual_max_drawdown = max_drawdown(result.equity_curve)
 
         return MonteCarloResult(
             final_equity=final_equity,
             max_drawdown=trial_max_drawdown,
+            sharpe=trial_sharpe,
             actual_final_equity=float(result.equity_curve.iloc[-1]),
             actual_max_drawdown=float(actual_max_drawdown),
+            actual_sharpe=float(sharpe_ratio(result.strategy_returns)),
             initial_capital=starting_equity,
             block_length=block_length,
             sample_paths=equity_paths[: min(n_sample_paths, self.n_trials)],
@@ -181,11 +203,14 @@ class MonteCarloAnalyzer:
             f"\nMonte Carlo bootstrap ({label}, block_length={mc.block_length}):",
             f"  actual final equity:   {mc.actual_final_equity:,.2f}",
             f"  actual max drawdown:   {mc.actual_max_drawdown:.4f}",
+            f"  actual sharpe:         {mc.actual_sharpe:.4f}",
             f"  P(final equity < initial capital): {mc.prob_below_initial_capital():.4f}",
             "  final equity percentiles: "
             + ", ".join(f"p{p}={v:,.2f}" for p, v in mc.final_equity_percentiles().items()),
             "  max drawdown percentiles: "
             + ", ".join(f"p{p}={v:.4f}" for p, v in mc.max_drawdown_percentiles().items()),
+            "  sharpe percentiles:       "
+            + ", ".join(f"p{p}={v:.4f}" for p, v in mc.sharpe_percentiles().items()),
         ]
         report = "\n".join(lines)
         print(report)

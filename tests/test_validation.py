@@ -112,3 +112,21 @@ def test_selection_uses_only_train_data_by_construction():
     # train-window selection carries through untouched by what would
     # have scored best on test.
     assert result.fold_metrics[0]["total_return"] == pytest.approx(0.0)
+
+
+def test_fold_still_evaluated_when_every_candidate_scores_nan_in_sample():
+    # Flat price and a never-long strategy: strategy_returns are all zero, so
+    # Sharpe is nan for every candidate on every train window. Selection must
+    # still fall back to a candidate and produce a fold rather than crashing.
+    df = _make_ohlcv([100.0] * 20)
+    flat_signal = pd.Series(0, index=df.index)
+
+    result = _validator(train_size=5, test_size=5).run(
+        df,
+        strategy_factory=lambda: _PrescribedSignalStrategy(flat_signal),
+        param_grid=[{}],
+        selection_metric="sharpe",
+    )
+
+    assert result.fold_selections == [{}, {}, {}]
+    assert len(result.stitched_result.equity_curve) == 15

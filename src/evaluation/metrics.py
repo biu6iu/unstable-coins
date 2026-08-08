@@ -22,8 +22,17 @@ def max_drawdown(equity: pd.Series) -> float:
     return (equity / running_max - 1).min()
 
 
-class PerformanceMetrics:
+def sharpe_ratio(returns: pd.Series) -> float:
+    """
+    Annualised Sharpe at a zero risk-free rate
+    """
+    std = returns.std()
+    if pd.isna(std) or std == 0:
+        return np.nan
+    return (returns.mean() / std) * np.sqrt(ANNUALISATION_FACTOR)
 
+
+class PerformanceMetrics:
     def compute(self, result: BacktestResult) -> dict:
         """Manually compute total/annualised return, volatility, Sharpe, max drawdown, and trade count for one backtest run"""
         equity = result.equity_curve
@@ -35,12 +44,7 @@ class PerformanceMetrics:
         cagr = (equity.iloc[-1] / equity.iloc[0]) ** (1 / years) - 1 if years > 0 else np.nan
 
         annualised_volatility = returns.std() * np.sqrt(ANNUALISATION_FACTOR)
-
-        sharpe = (
-            (returns.mean() / returns.std()) * np.sqrt(ANNUALISATION_FACTOR)
-            if returns.std() > 0
-            else np.nan
-        )
+        sharpe = sharpe_ratio(returns)
 
         return {
             "strategy": result.strategy_name,

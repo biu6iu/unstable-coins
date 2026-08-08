@@ -285,6 +285,7 @@ def test_registry_soft_voting_weights_derived_from_member_sharpes():
     strategy = build_strategies(
         [{"name": "soft_voting_ensemble", "params": {"member_sharpes": [1.0, -0.5, 3.0]}}]
     )[0]
+    assert isinstance(strategy, SoftVotingStrategy)
     assert strategy.weights == pytest.approx([0.25, 0.0, 0.75])
 
 
@@ -293,6 +294,7 @@ def test_registry_soft_voting_falls_back_to_uniform_when_no_member_has_positive_
     strategy = build_strategies(
         [{"name": "soft_voting_ensemble", "params": {"member_sharpes": [-0.9, -0.7, -0.3]}}]
     )[0]
+    assert isinstance(strategy, SoftVotingStrategy)
     assert strategy.weights is None
 
 
@@ -305,6 +307,7 @@ def test_registry_soft_voting_explicit_weights_override_member_sharpes():
             }
         ]
     )[0]
+    assert isinstance(strategy, SoftVotingStrategy)
     assert strategy.weights == [1.0, 1.0, 1.0]
 
 
@@ -313,4 +316,5 @@ def test_registry_soft_voting_rsi_window_is_configurable():
     strategy = build_strategies(
         [{"name": "soft_voting_ensemble", "params": {"rsi_window": 10, "buy_below": 20}}]
     )[0]
+    assert isinstance(strategy, SoftVotingStrategy)
     assert strategy.strategies[1].name == "RSIMeanReversion(10,20,50.0)"
