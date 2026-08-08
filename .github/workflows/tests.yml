@@ -1,0 +1,38 @@
+# The test suite is network-free by design - it uses SyntheticDataProvider and
+# injected fakes rather than ccxt, and seeds all randomness - so CI can run it
+# unmodified. Nothing here fetches market data or touches an exchange.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch makes an in-flight run obsolete
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      # Report both versions' failures, rather than hiding one behind the other
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install project and test dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run tests
+        run: pytest -q
