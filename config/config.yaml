@@ -46,6 +46,8 @@ param_grids:
 sweep:
   fast_options: [10, 20, 30]
   slow_options: [50, 100, 150]
+  min_holding_periods: [0, 2, 3, 5, 7]
+  min_holding_strategies: [rsi_filtered_crossover, soft_voting_ensemble, hard_voting_ensemble]
 
 # walk-forward fold sizes (bars)
 walk_forward:

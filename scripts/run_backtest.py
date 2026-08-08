@@ -62,13 +62,8 @@ def main() -> None:
         _print_combined_table(plain_res, wf_res, metrics)
 
 
-def _build_strategies(strategy_configs: list[dict]) -> tuple[list[Strategy], VotingStrategy]:
-    """
-    Build the config/registry-driven strategies
-    """
-    strategies = build_strategies(strategy_configs)
-
-    ensemble = VotingStrategy(
+def build_hard_voting_ensemble() -> VotingStrategy:
+    return VotingStrategy(
         [
             MACrossoverStrategy(fast=20, slow=50),
             RSIMeanReversionStrategy(window=14, buy_below=30, exit_above=50),
@@ -76,6 +71,15 @@ def _build_strategies(strategy_configs: list[dict]) -> tuple[list[Strategy], Vot
         ],
         k=2,
     )
+
+
+def _build_strategies(strategy_configs: list[dict]) -> tuple[list[Strategy], VotingStrategy]:
+    """
+    Build the config/registry-driven strategies
+    """
+    strategies = build_strategies(strategy_configs)
+
+    ensemble = build_hard_voting_ensemble()
     bh_index = next(i for i, s in enumerate(strategies) if s.name == "BuyAndHold")
     strategies.insert(bh_index, ensemble)
     return strategies, ensemble
