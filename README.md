@@ -73,14 +73,20 @@ strategy families, since each is a bet on different market behaviour:
    reveal how much a strategy's edge depends on the exact historical
    path.
 
+
+## Backtesting
+Run with:
+```
+python scripts/run_backtest.py
+```
+
 ## Paper Trading
 
-**Read-only.** Trading is simulated bookkeeping
+Trading is simulated bookkeeping
 written to a log file, useful for watching a strategy's behaviour on
 live data before (if ever) trusting it further.
 
 Run it with:
-
 ```
 python scripts/paper_trade.py
 ```
@@ -102,5 +108,23 @@ python scripts/reconcile_paper_trade.py logs/paper_trades.jsonl
 ```
 
 Divergences between the two paths reveal what the backtest abstraction
-hides - partial bars, exchange data revisions, and poll-timing gaps -
+hides (partial bars, exchange data revisions, and poll-timing gaps)
 not a bug in the backtest engine itself.
+
+### Results
+
+BTC/USDT daily candles, 730 bars (2024-08-11 to 2026-08-10), 0.1% fee,
+5 bps slippage, 10,000 starting capital.
+
+**In-sample (plain backtest).** Returns are net of fees and slippage.
+"Round trips" counts completed entry-to-exit trades; P/L is realised
+over those trades.
+
+| Strategy | Total return | Sharpe | Max drawdown | Round trips | Win rate | Profit factor | P/L |
+|---|---|---|---|---|---|---|---|
+| Donchian breakout (20,10) | +55.8% | **1.03** | -23.1% | 12 | 33% | 2.40 | +$5,577 |
+| Soft voting ensemble | +30.8% | 0.85 | -16.3% | 12 | 50% | 2.20 | +$3,269 |
+| TSMOM (60) | +42.8% | 0.79 | -27.8% | 10 | 30% | 2.08 | +$4,328 |
+| Hard voting (k=2) | +28.2% | 0.76 | **-15.9%** | 25 | 60% | 1.49 | +$2,819 |
+| MA crossover (20,50) | +29.6% | 0.60 | -29.0% | 8 | 63% | 1.82 | +$3,242 |
+
