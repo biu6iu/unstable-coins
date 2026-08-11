@@ -10,12 +10,12 @@ class DataProvider(ABC):
 
     @abstractmethod
     def fetch(self) -> pd.DataFrame:
-        """return OHLCV data in the standard schema"""
+        """return OHLCV data in the standard schema, closed bars only"""
         raise NotImplementedError
 
 
 def validate(df: pd.DataFrame) -> None:
-    """Raise if data doesn't conform to the standard OHLCV schema"""
+    """raise if data doesn't conform to the standard OHLCV schema"""
     if not isinstance(df.index, pd.DatetimeIndex):
         raise TypeError(f"Expected a DatetimeIndex, got {type(df.index).__name__}")
     if df.index.name != "timestamp":

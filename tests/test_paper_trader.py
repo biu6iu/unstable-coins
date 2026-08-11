@@ -119,9 +119,10 @@ def test_poll_once_returns_none_when_no_new_closed_bar(tmp_path):
     assert lines_after_second == lines_after_first
 
 
-def test_poll_once_ignores_still_forming_last_bar(tmp_path):
+def test_poll_once_acts_on_the_providers_newest_bar(tmp_path):
+    # providers deliver closed bars only, so discarding the last row here would leave the loop a bar behind the market
     ts = pd.date_range("2024-01-01T00:00", periods=4, freq="h")
-    window = _make_ohlcv_at(ts, [90, 90, 90, 200])  # last bar's extreme close must not affect anything
+    window = _make_ohlcv_at(ts, [90, 90, 90, 110])
     provider = _ScriptedProvider([window])
     trader = PaperTrader(
         provider=provider, strategy=_ThresholdStrategy(100), backtester=_backtester(),
@@ -130,8 +131,8 @@ def test_poll_once_ignores_still_forming_last_bar(tmp_path):
 
     record = trader.poll_once()
 
-    assert record.bar_timestamp == ts[2].isoformat()
-    assert ts[3] not in trader._history.index
+    assert record.bar_timestamp == ts[3].isoformat()
+    assert ts[3] in trader._history.index
 
 
 def test_poll_once_appends_exactly_the_newly_closed_bars(tmp_path):
@@ -147,10 +148,10 @@ def test_poll_once_appends_exactly_the_newly_closed_bars(tmp_path):
     )
 
     trader.poll_once()
-    assert list(trader._history.index) == list(ts1[:3])
+    assert list(trader._history.index) == list(ts1)
 
     trader.poll_once()
-    assert list(trader._history.index) == list(ts1[:3]) + [ts2[2], ts2[3]]
+    assert list(trader._history.index) == list(ts1) + [ts2[3], ts2[4]]
     assert not trader._history.index.duplicated().any()
 
 
@@ -183,7 +184,7 @@ def test_first_poll_seeds_full_warmup_history(tmp_path):
 
     trader.poll_once()
 
-    assert len(trader._history) == len(window) - 1
+    assert len(trader._history) == len(window)
 
 
 # --- Portfolio state must never diverge from a direct Backtester.run() --
@@ -196,9 +197,9 @@ def test_portfolio_state_matches_direct_backtester_run(tmp_path):
     strategy = _ThresholdStrategy(100)
 
     windows = [
-        df_full.iloc[0:4],  # closed: idx0-2 -> new: idx0,1,2
-        df_full.iloc[1:6],  # closed: idx1-4 -> new: idx3,4
-        df_full.iloc[3:8],  # closed: idx3-6 -> new: idx5,6
+        df_full.iloc[0:3],  # new: idx0,1,2
+        df_full.iloc[1:5],  # overlaps, new: idx3,4
+        df_full.iloc[3:7],  # overlaps, new: idx5,6
     ]
     provider = _ScriptedProvider(windows)
     trader = PaperTrader(
@@ -299,7 +300,7 @@ def test_jsonl_log_appends_one_line_per_new_bar_with_expected_fields(tmp_path):
     trader.poll_once()
 
     lines = log_path.read_text().splitlines()
-    assert len(lines) == 3  # 1 header + 2 decisions (poll 1: 00:00-02:00 close; poll 2: 03:00 closes)
+    assert len(lines) == 3  # 1 header + 2 decisions (poll 1: 00:00-03:00; poll 2: 04:00)
     header = json.loads(lines[0])
     assert header["type"] == "session_start"
     assert header["symbol"] == "BTC/USDT"

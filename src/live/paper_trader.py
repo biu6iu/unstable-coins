@@ -170,8 +170,9 @@ class PaperTrader:
             return None
 
         validate(raw)
-        closed = raw.iloc[:-1] 
-        new_bars = self._new_bars(closed)
+        
+        # providers hand over closed bars only, so every row here is actionable
+        new_bars = self._new_bars(raw)
         if new_bars.empty:
             self.logger.info("no new closed bar since %s", self._last_timestamp)
             return None
