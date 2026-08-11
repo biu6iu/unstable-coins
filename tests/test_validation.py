@@ -5,7 +5,7 @@ import pytest
 from src.backtest.engine import Backtester
 from src.evaluation.metrics import PerformanceMetrics
 from src.strategies.base import Strategy
-from src.validation.walk_forward import WalkForwardValidator
+from src.validation.walk_forward import WalkForwardValidator, fold_count
 
 
 def _make_ohlcv(close, index=None):
@@ -47,6 +47,26 @@ def _validator(train_size=5, test_size=5, expanding=False, fee=0.0):
         test_size=test_size,
         expanding=expanding,
     )
+
+
+@pytest.mark.parametrize(
+    "n_bars, train_size, test_size, expected",
+    [
+        (730, 365, 90, 4),      # the geometry Phase 15 set out to fix
+        (3281, 365, 90, 32),    # full BTC/USDT daily history at the same fold size
+        (3281, 730, 90, 28),    # longer train window buys history at the cost of folds
+        (365, 365, 90, 0),      # no room for a single test window
+        (100, 365, 90, 0),      # less history than one train window
+    ],
+)
+def test_fold_count_matches_the_geometry(n_bars, train_size, test_size, expected):
+    assert fold_count(n_bars, train_size, test_size) == expected
+
+
+def test_fold_count_agrees_with_the_folds_actually_run():
+    # the reported sample size is worthless if it can drift from the loop that produces the folds
+    validator = _validator(train_size=5, test_size=3)
+    assert validator.fold_count(20) == len(list(validator._folds(20)))
 
 
 def test_no_test_window_ever_overlaps_its_train_window():

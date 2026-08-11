@@ -10,6 +10,20 @@ from src.evaluation.metrics import PerformanceMetrics
 from src.strategies.base import Strategy
 
 
+def iter_folds(n_bars: int, train_size: int, test_size: int, expanding: bool = False):
+    """yield (train_start, train_end, test_start, test_end) bar indices for each fold"""
+    test_start = train_size
+    while test_start + test_size <= n_bars:
+        train_start = 0 if expanding else test_start - train_size
+        yield train_start, test_start, test_start, test_start + test_size
+        test_start += test_size
+
+
+def fold_count(n_bars: int, train_size: int, test_size: int, expanding: bool = False) -> int:
+    """how many folds a geometry yields over n_bars"""
+    return sum(1 for _ in iter_folds(n_bars, train_size, test_size, expanding))
+
+
 @dataclass
 class WalkForwardResult:
     """output of a full walk-forward run across all folds"""
@@ -37,12 +51,11 @@ class WalkForwardValidator:
         self.expanding = expanding
 
     def _folds(self, n_bars: int):
-        """Yield (train_start, train_end, test_start, test_end) bar indices for each fold"""
-        test_start = self.train_size
-        while test_start + self.test_size <= n_bars:
-            train_start = 0 if self.expanding else test_start - self.train_size
-            yield train_start, test_start, test_start, test_start + self.test_size
-            test_start += self.test_size
+        return iter_folds(n_bars, self.train_size, self.test_size, self.expanding)
+
+    def fold_count(self, n_bars: int) -> int:
+        """how many folds this validator's geometry yields over n_bars"""
+        return fold_count(n_bars, self.train_size, self.test_size, self.expanding)
 
     def run(
         self,

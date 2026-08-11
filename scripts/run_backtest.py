@@ -27,7 +27,7 @@ from src.strategies.registry import STRATEGY_REGISTRY, build_strategies
 from src.strategies.rsi_filter import RSIFilterStrategy
 from src.strategies.rsi_mean_reversion import RSIMeanReversionStrategy
 from src.strategies.volatility_breakout import DonchianBreakoutStrategy
-from src.validation.walk_forward import WalkForwardValidator
+from src.validation.walk_forward import WalkForwardValidator, fold_count
 
 logger = logging.getLogger(__name__)
 
@@ -54,15 +54,24 @@ def main() -> None:
         _report_ensemble_diagnostics(ensemble, plain_res, monte_carlo)
         _report_best_strategy_robustness(plain_res, metrics, monte_carlo)
 
-        wf_res = _run_walk_forward(
-            provider,
-            backtester,
-            metrics,
-            strategy_configs,
-            config["walk_forward"],
-            config.get("param_grids", {}),
-        )
-        _print_combined_table(plain_res, wf_res, metrics)
+        wf_cfg = config["walk_forward"]
+        # provider.fetch() is a cache hit so this reconstructs the exact df pipeline used internally without a second network round-trip
+        wf_df = FeatureEngineer().returns(DataCleaner().clean(provider.fetch()))
+        wf_by_train_size = {
+            train_size: _run_walk_forward(
+                wf_df,
+                backtester,
+                metrics,
+                strategy_configs,
+                wf_cfg,
+                config.get("param_grids", {}),
+                train_size,
+            )
+            for train_size in _train_sizes(wf_cfg)
+        }
+
+        _print_geometry_comparison(wf_by_train_size, metrics, len(wf_df), wf_cfg)
+        _print_combined_table(plain_res, wf_by_train_size[wf_cfg["train_size"]], metrics)
 
 
 def build_hard_voting_ensemble() -> VotingStrategy:
@@ -144,21 +153,7 @@ def _report_ensemble_diagnostics(ensemble: VotingStrategy, plain_res: list[Backt
         monte_carlo.print_drawdown_comparison(comparisons)
 
 
-def _report_best_strategy_robustness(
-    plain_res: list[BacktestResult],
-    metrics: PerformanceMetrics,
-    monte_carlo: MonteCarloAnalyzer | None,
-) -> None:
-    """
-    Bootstrap the highest-Sharpe strategy specifically.
-
-    The Pipeline's own Monte Carlo section covers strategies[0], which is just
-    whichever strategy config lists first - not the one whose headline number a
-    reader will quote. Block bootstrap only measures sampling uncertainty around
-    this history, so it can say "that Sharpe is indistinguishable from its
-    neighbours"; it cannot say the strategy generalises. That claim belongs to
-    the walk-forward column.
-    """
+def _report_best_strategy_robustness(plain_res: list[BacktestResult], metrics: PerformanceMetrics, monte_carlo: MonteCarloAnalyzer | None) -> None:
     if monte_carlo is None:
         return
 
@@ -204,24 +199,37 @@ def _param_grid(name: str, grid_cfg: dict, params: dict) -> list[dict]:
     return valid
 
 
+def _train_sizes(wf_cfg: dict) -> list[int]:
+    """
+    train windows to evaluate, configured one first
+    """
+    primary = wf_cfg["train_size"]
+    variants = wf_cfg.get("train_size_variants") or [primary]
+    return [primary] + [size for size in variants if size != primary]
+
+
 def _run_walk_forward(
-    provider: DataProvider,
+    df: pd.DataFrame,
     backtester: Backtester,
     metrics: PerformanceMetrics,
     strategy_configs: list[dict],
     wf_cfg: dict,
     grid_cfg: dict,
+    train_size: int,
 ) -> list[BacktestResult]:
     """Run every registered strategy through WalkForwardValidator"""
-    # provider.fetch() is a cache hit so this reconstructs the exact df pipeline used internally without a second network round-trip
-    df = FeatureEngineer().returns(DataCleaner().clean(provider.fetch()))
-
     validator = WalkForwardValidator(
         backtester=backtester,
         metrics=metrics,
-        train_size=wf_cfg["train_size"],
+        train_size=train_size,
         test_size=wf_cfg["test_size"],
         expanding=wf_cfg.get("expanding", False),
+    )
+
+    window = "expanding" if wf_cfg.get("expanding", False) else "rolling"
+    print(
+        f"\n=== Walk-forward geometry: {len(df)} bars, train={train_size}, "
+        f"test={wf_cfg['test_size']}, {window} -> {validator.fold_count(len(df))} folds ==="
     )
 
     stitched_res = []
@@ -290,6 +298,28 @@ def _save_trade_logs(res: list[BacktestResult], output_dir: Path) -> None:
         trades = extract_trades(result)
         filename = re.sub(r"[^A-Za-z0-9]+", "_", result.strategy_name).strip("_") + "_trades.csv"
         pd.DataFrame([asdict(t) for t in trades]).to_csv(output_dir / filename, index=False)
+
+
+def _print_geometry_comparison(
+    wf_by_train_size: dict[int, list[BacktestResult]],
+    metrics: PerformanceMetrics,
+    n_bars: int,
+    wf_cfg: dict,
+) -> None:
+    """
+    Out-of-sample results under each fold geometry, side by side.
+    """
+    columns = ["train_size", "folds", "strategy", "total_return", "sharpe", "max_drawdown"]
+    rows = []
+    for train_size, results in wf_by_train_size.items():
+        folds = fold_count(n_bars, train_size, wf_cfg["test_size"], wf_cfg.get("expanding", False))
+        for result in results:
+            row = metrics.compute(result)
+            row["train_size"] = train_size
+            row["folds"] = folds
+            rows.append(row)
+
+    print(format_table(columns, rows, title="\nWalk-forward out-of-sample by fold geometry:"))
 
 
 def _print_combined_table(plain_res: list[BacktestResult], wf_res: list[BacktestResult], metrics: PerformanceMetrics) -> None:

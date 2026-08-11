@@ -1,7 +1,7 @@
 data:
   symbol: BTC/USDT
   timeframe: 1d
-  limit: 730          # ~2 years of daily candles
+  limit: 5000       
 
 backtest:
   fee: 0.001            # 0.1% per position change
@@ -63,6 +63,7 @@ walk_forward:
   train_size: 365
   test_size: 90
   expanding: false
+  train_size_variants: [365, 730]
 
 # monte carlo configs
 monte_carlo:
