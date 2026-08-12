@@ -167,9 +167,7 @@ def _report_best_strategy_robustness(plain_res: list[BacktestResult], metrics: P
 
 def _report_best_vs_field(plain_res: list[BacktestResult], metrics: PerformanceMetrics, monte_carlo: MonteCarloAnalyzer | None) -> None:
     """
-    Whether the headline strategy is separable from the two comparisons a reader will actually make: the benchmark, and the next best strategy.
-
-    A ranking table invites the conclusion that the top row is the best strategy. Paired bootstrap says whether that ordering is a finding or a coin flip, so it is printed alongside the ranking rather than left for the reader to wonder about.
+    whether the headline strategy is separable from the two comparisons a reader will actually make: the benchmark, and the next best strategy
     """
     if monte_carlo is None:
         return

@@ -19,12 +19,7 @@ def _percentile_summary(values: np.ndarray) -> dict[int, float]:
 class MonteCarloResult:
     """
     Distributions of final equity and max drawdown from resampled trials of one strategy's daily returns,
-    compared with historical values.
-
-    sample_paths is a small slice of the SAME equity_paths matrix used to
-    derive final_equity/max_drawdown (not a separate re-roll), kept for
-    spaghetti-plot visualisation of what the simulated trials actually
-    look like over time, not just their endpoint/trough distributions.
+    compared with historical values
     """
 
     final_equity: np.ndarray
@@ -45,11 +40,6 @@ class MonteCarloResult:
         return _percentile_summary(self.max_drawdown)
 
     def sharpe_percentiles(self) -> dict[int, float]:
-        """
-        Sampling distribution of the headline Sharpe. Two strategies whose p5-p95
-        bands overlap heavily are not distinguishable on this one history, however
-        far apart their point estimates sit.
-        """
         return _percentile_summary(self.sharpe)
 
     def prob_below_initial_capital(self) -> float:
@@ -74,14 +64,7 @@ class NoiseRobustnessResult:
 @dataclass
 class PairedComparisonResult:
     """
-    Distribution of the Sharpe DIFFERENCE between two strategies, measured on shared resampled histories.
-
-    Both strategies' returns are read through the SAME resampled bar indices, so
-    every trial scores them against one common synthetic market. Bootstrapping
-    each strategy separately instead would let them face different markets, and
-    the resulting marginal bands are dominated by which bars a trial happened to
-    draw - variance that a paired difference cancels. That is why two widely
-    overlapping marginal bands can still hide a decidable difference.
+    Distribution of the Sharpe DIFFERENCE between two strategies, measured on shared resampled histories
     """
 
     sharpe_delta: np.ndarray
@@ -245,18 +228,9 @@ class MonteCarloAnalyzer:
             noise_std=noise_std,
         )
 
-    def compare_strategies(
-        self, result_a: BacktestResult, result_b: BacktestResult, block_length: int | None = None
-    ) -> PairedComparisonResult:
+    def compare_strategies(self, result_a: BacktestResult, result_b: BacktestResult, block_length: int | None = None) -> PairedComparisonResult:
         """
-        Bootstrap the Sharpe difference between two strategies over shared resampled bars.
-
-        One index matrix is drawn and applied to both return series, so each trial
-        asks "on this synthetic market, which strategy did better?" rather than
-        comparing two strategies that faced unrelated markets. This is what makes
-        the difference decidable: the marginal Sharpe bands of two strategies on
-        the same history overlap almost entirely, because both move with whichever
-        bars were drawn, while their difference is comparatively stable.
+        bootstrap the Sharpe difference between two strategies over shared resampled bars
         """
         block_length = self.block_length if block_length is None else block_length
         returns_a, returns_b = _paired_returns(result_a, result_b)
