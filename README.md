@@ -145,3 +145,11 @@ flattering one:
 | RSI-filtered crossover | 0.28 | 0.56 |
 | RSI mean reversion | 0.27 | 0.58 |
 
+**Is the top row actually the best?** Every run now paired-bootstraps the
+leader against the benchmark and the runner-up, resampling both
+strategies through the same synthetic markets. Neither gap is decidable
+on this history: P(TSMOM beats Donchian) = 0.52 with the Sharpe
+difference spanning -0.39 to +0.44, and P(TSMOM beats buy-and-hold) =
+0.86 spanning -0.12 to +0.65. Read the ordering above as a ranking of
+one sample, not a ranking of strategies.
+
