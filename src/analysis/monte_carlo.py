@@ -71,6 +71,51 @@ class NoiseRobustnessResult:
         return _percentile_summary(self.final_equity)
 
 
+@dataclass
+class PairedComparisonResult:
+    """
+    Distribution of the Sharpe DIFFERENCE between two strategies, measured on shared resampled histories.
+
+    Both strategies' returns are read through the SAME resampled bar indices, so
+    every trial scores them against one common synthetic market. Bootstrapping
+    each strategy separately instead would let them face different markets, and
+    the resulting marginal bands are dominated by which bars a trial happened to
+    draw - variance that a paired difference cancels. That is why two widely
+    overlapping marginal bands can still hide a decidable difference.
+    """
+
+    sharpe_delta: np.ndarray
+    actual_sharpe_a: float
+    actual_sharpe_b: float
+    name_a: str
+    name_b: str
+    block_length: int
+    n_bars: int
+
+    @property
+    def actual_delta(self) -> float:
+        return self.actual_sharpe_a - self.actual_sharpe_b
+
+    def delta_percentiles(self) -> dict[int, float]:
+        return _percentile_summary(self.sharpe_delta)
+
+    def prob_a_beats_b(self) -> float:
+        """share of trials where a's Sharpe exceeded b's on the same resampled bars"""
+        finite = self.sharpe_delta[np.isfinite(self.sharpe_delta)]
+        if finite.size == 0:
+            return float("nan")
+        return float(np.mean(finite > 0))
+
+    def is_distinguishable(self) -> bool:
+        """
+        whether the p5-p95 band of the difference excludes zero
+
+        a band straddling zero means this history cannot say which strategy is better, however far apart the two point estimates look
+        """
+        percentiles = self.delta_percentiles()
+        return percentiles[5] > 0 or percentiles[95] < 0
+
+
 def _simple_bootstrap_matrix(n: int, n_trials: int, rng: np.random.Generator) -> np.ndarray:
     """iid resampling"""
     return rng.integers(0, n, size=(n_trials, n))
@@ -86,6 +131,34 @@ def _block_bootstrap_matrix(n: int, block_length: int, n_trials: int, rng: np.ra
     offsets = np.arange(block_length)
     indices = block_starts[:, :, None] + offsets[None, None, :]
     return indices.reshape(n_trials, n_blocks * block_length)[:, :n]
+
+
+def _trial_sharpes(sampled_returns: np.ndarray) -> np.ndarray:
+    """annualised Sharpe of every bootstrap trial; a trial whose resampled returns never vary has no Sharpe"""
+    # ddof=1 to match pandas' std
+    trial_std = sampled_returns.std(axis=1, ddof=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return np.where(
+            trial_std > 0,
+            sampled_returns.mean(axis=1) / trial_std * np.sqrt(ANNUALISATION_FACTOR),
+            np.nan,
+        )
+
+
+def _paired_returns(result_a: BacktestResult, result_b: BacktestResult) -> tuple[np.ndarray, np.ndarray]:
+    """
+    both strategies' daily returns over the bars they share
+
+    pairing only means anything if the two series describe the same days, so the comparison is restricted to the overlap rather than quietly scoring two different periods against each other
+    """
+    aligned = pd.DataFrame(
+        {"a": result_a.strategy_returns, "b": result_b.strategy_returns}
+    ).dropna()
+    if aligned.empty:
+        raise ValueError(
+            f"{result_a.strategy_name} and {result_b.strategy_name} share no overlapping bars to compare on"
+        )
+    return aligned["a"].to_numpy(), aligned["b"].to_numpy()
 
 
 def _perturb_prices(df: pd.DataFrame, noise_std: float, rng: np.random.Generator) -> pd.DataFrame:
@@ -133,14 +206,7 @@ class MonteCarloAnalyzer:
         running_max = np.maximum.accumulate(equity_paths, axis=1)
         trial_max_drawdown = (equity_paths / running_max - 1).min(axis=1)
 
-        # ddof=1 to match pandas' std
-        trial_std = sampled_returns.std(axis=1, ddof=1)
-        with np.errstate(invalid="ignore", divide="ignore"):
-            trial_sharpe = np.where(
-                trial_std > 0,
-                sampled_returns.mean(axis=1) / trial_std * np.sqrt(ANNUALISATION_FACTOR),
-                np.nan,
-            )
+        trial_sharpe = _trial_sharpes(sampled_returns)
 
         actual_max_drawdown = max_drawdown(result.equity_curve)
 
@@ -179,6 +245,35 @@ class MonteCarloAnalyzer:
             noise_std=noise_std,
         )
 
+    def compare_strategies(
+        self, result_a: BacktestResult, result_b: BacktestResult, block_length: int | None = None
+    ) -> PairedComparisonResult:
+        """
+        Bootstrap the Sharpe difference between two strategies over shared resampled bars.
+
+        One index matrix is drawn and applied to both return series, so each trial
+        asks "on this synthetic market, which strategy did better?" rather than
+        comparing two strategies that faced unrelated markets. This is what makes
+        the difference decidable: the marginal Sharpe bands of two strategies on
+        the same history overlap almost entirely, because both move with whichever
+        bars were drawn, while their difference is comparatively stable.
+        """
+        block_length = self.block_length if block_length is None else block_length
+        returns_a, returns_b = _paired_returns(result_a, result_b)
+
+        rng = np.random.default_rng(self.seed)
+        indices = _block_bootstrap_matrix(len(returns_a), block_length, self.n_trials, rng)
+
+        return PairedComparisonResult(
+            sharpe_delta=_trial_sharpes(returns_a[indices]) - _trial_sharpes(returns_b[indices]),
+            actual_sharpe_a=float(sharpe_ratio(result_a.strategy_returns)),
+            actual_sharpe_b=float(sharpe_ratio(result_b.strategy_returns)),
+            name_a=result_a.strategy_name,
+            name_b=result_b.strategy_name,
+            block_length=block_length,
+            n_bars=len(returns_a),
+        )
+
     def compare_ensemble_drawdowns(self, ensemble_result: BacktestResult, member_results: list[BacktestResult]) -> dict[str, MonteCarloResult]:
         comparisons = {ensemble_result.strategy_name: self.bootstrap(ensemble_result)}
         for member_result in member_results:
@@ -211,6 +306,27 @@ class MonteCarloAnalyzer:
             + ", ".join(f"p{p}={v:.4f}" for p, v in mc.max_drawdown_percentiles().items()),
             "  sharpe percentiles:       "
             + ", ".join(f"p{p}={v:.4f}" for p, v in mc.sharpe_percentiles().items()),
+        ]
+        report = "\n".join(lines)
+        print(report)
+        return report
+
+    def print_comparison_report(self, comparison: PairedComparisonResult) -> str:
+        verdict = (
+            "distinguishable on this history"
+            if comparison.is_distinguishable()
+            else "NOT distinguishable on this history (the p5-p95 band of the difference contains zero)"
+        )
+        lines = [
+            f"\nPaired bootstrap ({comparison.name_a} vs {comparison.name_b}, "
+            f"block_length={comparison.block_length}, {comparison.n_bars} shared bars):",
+            f"  actual sharpe:  {comparison.name_a}={comparison.actual_sharpe_a:.4f}, "
+            f"{comparison.name_b}={comparison.actual_sharpe_b:.4f}",
+            f"  actual sharpe difference: {comparison.actual_delta:+.4f}",
+            f"  P({comparison.name_a} beats {comparison.name_b}): {comparison.prob_a_beats_b():.4f}",
+            "  sharpe difference percentiles: "
+            + ", ".join(f"p{p}={v:+.4f}" for p, v in comparison.delta_percentiles().items()),
+            f"  verdict: {verdict}",
         ]
         report = "\n".join(lines)
         print(report)

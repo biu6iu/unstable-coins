@@ -53,6 +53,7 @@ def main() -> None:
         _save_trade_logs(plain_res, DEFAULT_REPORTS_DIR)
         _report_ensemble_diagnostics(ensemble, plain_res, monte_carlo)
         _report_best_strategy_robustness(plain_res, metrics, monte_carlo)
+        _report_best_vs_field(plain_res, metrics, monte_carlo)
 
         wf_cfg = config["walk_forward"]
         # provider.fetch() is a cache hit so this reconstructs the exact df pipeline used internally without a second network round-trip
@@ -162,6 +163,29 @@ def _report_best_strategy_robustness(plain_res: list[BacktestResult], metrics: P
 
     print(f"\nRobustness check on the best plain-backtest Sharpe ({best_sharpe:.4f}):")
     monte_carlo.print_bootstrap_report(monte_carlo.bootstrap(best), label=best.strategy_name)
+
+
+def _report_best_vs_field(plain_res: list[BacktestResult], metrics: PerformanceMetrics, monte_carlo: MonteCarloAnalyzer | None) -> None:
+    """
+    Whether the headline strategy is separable from the two comparisons a reader will actually make: the benchmark, and the next best strategy.
+
+    A ranking table invites the conclusion that the top row is the best strategy. Paired bootstrap says whether that ordering is a finding or a coin flip, so it is printed alongside the ranking rather than left for the reader to wonder about.
+    """
+    if monte_carlo is None:
+        return
+
+    scored = [(metrics.compute(result)["sharpe"], result) for result in plain_res]
+    ranked = sorted((pair for pair in scored if pd.notna(pair[0])), key=lambda pair: pair[0], reverse=True)
+    if len(ranked) < 2:
+        return
+
+    best, runner_up = ranked[0][1], ranked[1][1]
+    print(f"\nIs the best strategy ({best.strategy_name}) distinguishable from the field?")
+
+    benchmark = next((r for r in plain_res if r.strategy_name == "BuyAndHold"), None)
+    if benchmark is not None and benchmark is not best:
+        monte_carlo.print_comparison_report(monte_carlo.compare_strategies(best, benchmark))
+    monte_carlo.print_comparison_report(monte_carlo.compare_strategies(best, runner_up))
 
 
 _GRID_CONSTRAINTS: dict[str, tuple[tuple[str, str], ...]] = {
