@@ -209,3 +209,87 @@ def test_sharpe_percentiles_survive_trials_with_no_variation():
     assert np.isnan(mc.sharpe).all()
     with pytest.warns(RuntimeWarning, match="All-NaN"):
         assert np.isnan(mc.sharpe_percentiles()[50])
+
+
+# --- paired strategy comparison ------------------------------------------
+
+
+def test_identical_results_give_an_exactly_zero_delta_distribution():
+    returns = np.random.default_rng(0).normal(0.001, 0.02, size=200)
+    a = _make_result(returns, strategy_name="A")
+    b = _make_result(returns, strategy_name="B")
+
+    comparison = MonteCarloAnalyzer(n_trials=200, block_length=20).compare_strategies(a, b)
+
+    # both series read through the same resampled bars, so every trial cancels exactly
+    assert np.all(comparison.sharpe_delta == 0.0)
+    assert comparison.prob_a_beats_b() == 0.0
+    assert not comparison.is_distinguishable()
+
+
+def test_strictly_dominating_strategy_beats_the_other_in_every_trial():
+    rng = np.random.default_rng(1)
+    base = rng.normal(0.0, 0.02, size=200)
+    # a shifts every bar's return up by a constant: same volatility, higher mean,
+    # so a's Sharpe exceeds b's on any resampling of the bars whatsoever
+    a = _make_result(base + 0.01, strategy_name="Better")
+    b = _make_result(base, strategy_name="Worse")
+
+    comparison = MonteCarloAnalyzer(n_trials=200, block_length=20).compare_strategies(a, b)
+
+    assert comparison.prob_a_beats_b() == 1.0
+    assert comparison.actual_delta > 0
+    assert comparison.is_distinguishable()
+    assert comparison.delta_percentiles()[5] > 0
+
+
+def test_comparison_is_reproducible_for_a_given_seed():
+    rng = np.random.default_rng(2)
+    a = _make_result(rng.normal(0.001, 0.02, size=150), strategy_name="A")
+    b = _make_result(rng.normal(0.001, 0.02, size=150), strategy_name="B")
+
+    first = MonteCarloAnalyzer(n_trials=100, seed=7).compare_strategies(a, b)
+    second = MonteCarloAnalyzer(n_trials=100, seed=7).compare_strategies(a, b)
+    different_seed = MonteCarloAnalyzer(n_trials=100, seed=8).compare_strategies(a, b)
+
+    assert np.array_equal(first.sharpe_delta, second.sharpe_delta)
+    assert not np.array_equal(first.sharpe_delta, different_seed.sharpe_delta)
+
+
+def test_pairing_is_tighter_than_two_independent_bootstraps():
+    # the entire justification for pairing: both strategies face the same drawn
+    # market, so the shared "which bars came up" variance cancels out of the
+    # difference instead of compounding across two independent draws
+    rng = np.random.default_rng(3)
+    market = rng.normal(0.001, 0.02, size=300)
+    a = _make_result(market + rng.normal(0.0, 0.002, size=300), strategy_name="A")
+    b = _make_result(market + rng.normal(0.0, 0.002, size=300), strategy_name="B")
+
+    analyzer = MonteCarloAnalyzer(n_trials=1000, block_length=20)
+    paired = analyzer.compare_strategies(a, b).sharpe_delta
+    independent = analyzer.bootstrap(a).sharpe - MonteCarloAnalyzer(
+        n_trials=1000, seed=99, block_length=20
+    ).bootstrap(b).sharpe
+
+    assert np.std(paired) < np.std(independent)
+
+
+def test_comparison_uses_only_the_bars_both_strategies_share():
+    rng = np.random.default_rng(4)
+    a = _make_result(rng.normal(0.001, 0.02, size=200), strategy_name="Long")
+    # a walk-forward result covers fewer bars than a plain backtest of the same history
+    b = _make_result(rng.normal(0.001, 0.02, size=200), strategy_name="Short")
+    b.strategy_returns.iloc[:120] = np.nan
+
+    comparison = MonteCarloAnalyzer(n_trials=50).compare_strategies(a, b)
+
+    assert comparison.n_bars == 80
+
+
+def test_comparison_rejects_strategies_with_no_overlapping_bars():
+    a = _make_result(np.full(50, 0.01), strategy_name="A")
+    b = _make_result(np.full(50, 0.01), strategy_name="B")
+    b.strategy_returns.index = pd.date_range("2030-01-01", periods=50, freq="D", name="timestamp")
+
+    with pytest.raises(ValueError, match="no overlapping bars"):
+        MonteCarloAnalyzer(n_trials=10).compare_strategies(a, b)
