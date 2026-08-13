@@ -15,7 +15,7 @@ class Estimate:
     @classmethod
     def from_se(cls, value: float, se: float, method: str, confidence: float = DEFAULT_CONFIDENCE) -> "Estimate":
         """build a normal-approximation interval"""
-        z = stats.norm.ppf(0.5 + confidence / 2)
+        z = float(stats.norm.ppf(0.5 + confidence / 2))
         return cls(value=value, se=se, ci_low=value - z * se, ci_high=value + z * se, method=method)
 
     def excludes(self, null_value: float = 0.0) -> bool:
