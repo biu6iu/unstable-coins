@@ -3,9 +3,11 @@
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import stats
 
 from src.evaluation.metrics import ANNUALISATION_FACTOR, sharpe_ratio
 from src.stats.estimate import Estimate, HypothesisTest
+from src.stats.multiple_testing import deflated_sharpe_ratio, expected_max_sharpe, reality_check
 from src.stats.sharpe import (
     effective_sample_size,
     lo_annualisation_factor,
@@ -180,3 +182,139 @@ def test_zero_variance_returns_give_no_sharpe_rather_than_a_divide_by_zero():
 
     assert np.isnan(sharpe_estimate(flat, "nonnormal").value)
     assert np.isnan(sharpe_se_hac(flat))
+
+
+def test_expected_max_sharpe_grows_with_the_width_of_the_search():
+    widths = [expected_max_sharpe(n, 0.5) for n in (2, 10, 100, 1000)]
+
+    assert widths == sorted(widths)
+    assert all(width > 0 for width in widths)
+
+
+def test_expected_max_sharpe_scales_with_the_dispersion_of_the_trials():
+    assert expected_max_sharpe(100, 1.0) == pytest.approx(2 * expected_max_sharpe(100, 0.5))
+    # a search over identical candidates cannot get lucky, however wide it is
+    assert expected_max_sharpe(1000, 0.0) == 0.0
+
+
+def test_a_single_trial_has_no_maximum_to_inflate():
+    assert expected_max_sharpe(1, 0.5) == 0.0
+
+
+def test_expected_max_sharpe_rejects_an_impossible_search():
+    with pytest.raises(ValueError, match="at least one trial"):
+        expected_max_sharpe(0, 0.5)
+
+    with pytest.raises(ValueError, match="cannot be negative"):
+        expected_max_sharpe(10, -0.1)
+
+
+def test_deflated_sharpe_reduces_to_the_ordinary_sharpe_p_value_for_one_trial():
+    returns = _normal_returns(n=3000, sharpe=0.05, seed=20)
+    estimate = sharpe_estimate(returns, "nonnormal")
+    ordinary_p = float(stats.norm.sf(estimate.value / estimate.se))
+
+    result = deflated_sharpe_ratio(returns, n_trials=1, trial_sr_std=0.5)
+
+    assert result.p_value == pytest.approx(ordinary_p)
+
+
+def test_deflation_makes_a_sharpe_harder_to_believe_as_the_search_widens():
+    returns = _normal_returns(n=3000, sharpe=0.05, seed=21)
+    p_values = [deflated_sharpe_ratio(returns, n, 0.4).p_value for n in (1, 10, 100, 1000)]
+
+    assert p_values == sorted(p_values)
+
+
+def test_a_lucky_sharpe_from_a_wide_search_does_not_survive_deflation():
+    # a genuine Sharpe of ~1.8 annualised, but found by a 500-wide search whose trials scatter by 0.6
+    returns = _normal_returns(n=3000, sharpe=1.8 / ROOT_Q, seed=22)
+
+    assert deflated_sharpe_ratio(returns, n_trials=1, trial_sr_std=0.6).is_significant()
+    assert not deflated_sharpe_ratio(returns, n_trials=500, trial_sr_std=0.6).is_significant()
+
+
+def test_deflated_sharpe_reports_the_benchmark_it_tested_against():
+    result = deflated_sharpe_ratio(_normal_returns(seed=23), n_trials=100, trial_sr_std=0.5)
+
+    assert f"{expected_max_sharpe(100, 0.5):.3f}" in result.null
+
+
+def test_deflating_a_flat_return_series_is_undefined_rather_than_significant():
+    result = deflated_sharpe_ratio(pd.Series(np.zeros(100)), n_trials=10, trial_sr_std=0.5)
+
+    assert np.isnan(result.p_value)
+    assert not result.is_significant()
+
+
+def _candidate_field(n_with_edge=0, edge=0.001, n_candidates=20, n_bars=1500, seed=0):
+    """a benchmark plus candidates that track it with independent noise, some given a genuine constant edge"""
+    rng = np.random.default_rng(seed)
+    index = pd.date_range("2020-01-01", periods=n_bars, freq="D", name="timestamp")
+    benchmark = pd.Series(rng.normal(0.0005, 0.02, n_bars), index=index)
+
+    candidates = {}
+    for i in range(n_candidates):
+        tracked = benchmark.to_numpy() + rng.normal(0, 0.01, n_bars)
+        candidates[f"s{i}"] = pd.Series(tracked + (edge if i < n_with_edge else 0.0), index=index)
+    return pd.DataFrame(candidates), benchmark
+
+
+def test_a_field_of_pure_noise_strategies_does_not_beat_the_benchmark():
+    candidates, benchmark = _candidate_field(seed=1)
+
+    assert not reality_check(candidates, benchmark, n_trials=2000).is_significant()
+
+
+def test_a_genuine_constant_edge_is_found():
+    candidates, benchmark = _candidate_field(n_with_edge=1, seed=1)
+    result = reality_check(candidates, benchmark, n_trials=2000)
+
+    assert result.is_significant()
+    assert "s0" in result.conclusion
+
+
+def test_reality_check_rejects_a_winner_the_naive_per_candidate_test_would_believe():
+    # seed 2 is a search over pure noise whose luckiest candidate looks significant on its own
+    candidates, benchmark = _candidate_field(seed=2)
+    excess = candidates.sub(benchmark, axis=0)
+    best_naive_p = min(float(stats.ttest_1samp(excess[c], 0, alternative="greater").pvalue) for c in excess)
+
+    assert best_naive_p < 0.01
+    assert not reality_check(candidates, benchmark, n_trials=2000).is_significant()
+
+
+def test_duplicating_a_candidate_cannot_change_the_verdict():
+    """every candidate must see the same resampled bars, or a duplicate would draw its own and shift the maximum"""
+    candidates, benchmark = _candidate_field(n_candidates=5, seed=3)
+    padded = candidates.assign(s0_again=candidates["s0"])
+
+    assert reality_check(padded, benchmark, n_trials=1000).p_value == pytest.approx(
+        reality_check(candidates, benchmark, n_trials=1000).p_value
+    )
+
+
+def test_reality_check_is_reproducible_and_seed_dependent():
+    candidates, benchmark = _candidate_field(n_candidates=5, seed=4)
+    p_value = reality_check(candidates, benchmark, n_trials=500, seed=7).p_value
+
+    assert reality_check(candidates, benchmark, n_trials=500, seed=7).p_value == p_value
+    assert reality_check(candidates, benchmark, n_trials=500, seed=8).p_value != p_value
+
+
+def test_a_single_candidate_is_a_valid_if_uncorrected_search():
+    candidates, benchmark = _candidate_field(n_with_edge=1, n_candidates=1, seed=5)
+
+    assert reality_check(candidates, benchmark, n_trials=1000).is_significant()
+
+
+def test_reality_check_rejects_an_empty_field_and_a_disjoint_benchmark():
+    candidates, benchmark = _candidate_field(n_candidates=3, seed=6)
+
+    with pytest.raises(ValueError, match="at least one candidate"):
+        reality_check(pd.DataFrame(index=candidates.index), benchmark)
+
+    elsewhere = benchmark.copy()
+    elsewhere.index = benchmark.index + pd.Timedelta(days=10_000)
+    with pytest.raises(ValueError, match="no overlapping bars"):
+        reality_check(candidates, elsewhere)
