@@ -10,6 +10,7 @@ from src.evaluation.metrics import ANNUALISATION_FACTOR, sharpe_ratio
 from src.stats.attribution import alpha_beta
 from src.stats.estimate import Estimate, HypothesisTest
 from src.stats.multiple_testing import deflated_sharpe_ratio, expected_max_sharpe, reality_check
+from src.stats.power import detectable_effect, required_periods, sharpe_diff_power
 from src.stats.sharpe import (
     effective_sample_size,
     lo_annualisation_factor,
@@ -386,3 +387,53 @@ def test_alpha_beta_restricts_to_shared_bars():
 
     with pytest.raises(ValueError, match="no overlapping bars"):
         alpha_beta(strategy, benchmark)
+
+
+def test_required_periods_inverts_sharpe_diff_power():
+    n = required_periods(delta=0.3, corr=0.6, sr=1.0, power=0.8, alpha=0.05)
+
+    assert sharpe_diff_power(delta=0.3, corr=0.6, sr=1.0, n_periods=n, alpha=0.05) == pytest.approx(0.8, abs=1e-3)
+
+
+def test_detectable_effect_inverts_required_periods():
+    n = required_periods(delta=0.3, corr=0.6, sr=1.0, power=0.8, alpha=0.05)
+
+    assert detectable_effect(n_periods=n, corr=0.6, sr=1.0, power=0.8, alpha=0.05) == pytest.approx(0.3, rel=1e-3)
+
+
+def test_power_falls_as_correlation_falls():
+    powers = [sharpe_diff_power(delta=0.3, corr=c, sr=1.0, n_periods=3280) for c in (0.9, 0.7, 0.5, 0.0)]
+
+    assert powers == sorted(powers, reverse=True)
+
+
+def test_power_rises_with_more_periods():
+    powers = [sharpe_diff_power(delta=0.3, corr=0.7, sr=1.0, n_periods=n) for n in (365, 3650, 36500)]
+
+    assert powers == sorted(powers)
+
+
+def test_detectable_effect_shrinks_with_more_periods():
+    effects = [detectable_effect(n_periods=n, corr=0.7, sr=1.0) for n in (365, 3650, 36500)]
+
+    assert effects == sorted(effects, reverse=True)
+
+
+def test_reproduces_the_phase_16_headline_sample_size_argument():
+    # the whole justification for this phase: at BTC/USDT's ~0.7 top-two correlation and SR~1,
+    # detecting a Sharpe difference of 0.25 needs ~113 years of daily data, 0.5 needs ~28
+    assert required_periods(delta=0.25, corr=0.7, sr=1.0) / ANNUALISATION_FACTOR == pytest.approx(113, abs=1)
+    assert required_periods(delta=0.5, corr=0.7, sr=1.0) / ANNUALISATION_FACTOR == pytest.approx(28, abs=1)
+
+
+def test_actual_nine_years_of_data_has_low_power_for_a_small_difference():
+    # T = 3280 is what Phase 15 actually had; a delta of 0.25 at rho=0.7 should be nowhere near detectable
+    assert sharpe_diff_power(delta=0.25, corr=0.7, sr=1.0, n_periods=3280) < 0.2
+
+
+def test_perfectly_correlated_strategies_have_no_detectable_difference_variance():
+    with pytest.raises(ValueError, match="correlation must be below 1"):
+        sharpe_diff_power(delta=0.3, corr=1.0, sr=1.0, n_periods=3280)
+
+    with pytest.raises(ValueError, match="correlation must be below 1"):
+        required_periods(delta=0.3, corr=1.0, sr=1.0)
