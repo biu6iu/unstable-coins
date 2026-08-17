@@ -5,7 +5,9 @@ import pandas as pd
 import pytest
 from scipy import stats
 
+from src.backtest.result import BacktestResult
 from src.evaluation.metrics import ANNUALISATION_FACTOR, sharpe_ratio
+from src.stats.attribution import alpha_beta
 from src.stats.estimate import Estimate, HypothesisTest
 from src.stats.multiple_testing import deflated_sharpe_ratio, expected_max_sharpe, reality_check
 from src.stats.sharpe import (
@@ -318,3 +320,69 @@ def test_reality_check_rejects_an_empty_field_and_a_disjoint_benchmark():
     elsewhere.index = benchmark.index + pd.Timedelta(days=10_000)
     with pytest.raises(ValueError, match="no overlapping bars"):
         reality_check(candidates, elsewhere)
+
+
+def _make_result(returns_values, strategy_name="Test"):
+    """a BacktestResult whose non-returns fields are never touched by paired_returns/alpha_beta"""
+    index = pd.date_range("2020-01-01", periods=len(returns_values), freq="D", name="timestamp")
+    returns = pd.Series(returns_values, index=index, dtype=float)
+    zeros = pd.Series(0.0, index=index)
+    equity = 1000.0 * (1 + returns).cumprod()
+    df = pd.DataFrame({"close": equity}, index=index)
+    return BacktestResult(
+        df=df,
+        positions=pd.Series(1, index=index),
+        strategy_returns=returns,
+        equity_curve=equity,
+        trade_count=1,
+        strategy_name=strategy_name,
+        gross_returns=returns,
+        fee_drag=zeros,
+        slippage_drag=zeros,
+        cash=zeros,
+        units=zeros,
+    )
+
+
+def test_alpha_beta_recovers_a_known_linear_relationship():
+    rng = np.random.default_rng(30)
+    n = 3000
+    benchmark_returns = rng.normal(0.0005, 0.02, n)
+    strategy_returns = 2 * benchmark_returns + 0.001
+
+    result = alpha_beta(_make_result(strategy_returns, "Strategy"), _make_result(benchmark_returns, "Benchmark"))
+
+    assert result["beta"].value == pytest.approx(2.0, abs=0.05)
+    assert result["alpha"].value == pytest.approx(0.001 * ANNUALISATION_FACTOR, rel=0.05)
+    assert result["alpha"].excludes(0.0)
+    assert result["beta"].excludes(0.0)
+
+
+def test_alpha_beta_finds_no_alpha_when_the_strategy_is_pure_beta():
+    rng = np.random.default_rng(31)
+    benchmark_returns = rng.normal(0.0005, 0.02, 3000)
+
+    result = alpha_beta(_make_result(1.5 * benchmark_returns, "Strategy"), _make_result(benchmark_returns, "Benchmark"))
+
+    assert not result["alpha"].excludes(0.0)
+
+
+def test_alpha_beta_uses_hac_standard_errors_that_widen_under_autocorrelation():
+    strategy_returns = _ar1_returns(0.3, n=3000, seed=32).to_numpy()
+    benchmark_returns = _ar1_returns(0.3, n=3000, seed=33).to_numpy()
+
+    hac = alpha_beta(_make_result(strategy_returns), _make_result(benchmark_returns), max_lags=8)
+    iid = alpha_beta(_make_result(strategy_returns), _make_result(benchmark_returns), max_lags=0)
+
+    assert hac["alpha"].se > iid["alpha"].se
+
+
+def test_alpha_beta_restricts_to_shared_bars():
+    rng = np.random.default_rng(34)
+    benchmark_returns = rng.normal(0.0005, 0.02, 500)
+    strategy = _make_result(2 * benchmark_returns + 0.001, "Strategy")
+    benchmark = _make_result(benchmark_returns, "Benchmark")
+    benchmark.strategy_returns.index = benchmark.strategy_returns.index + pd.Timedelta(days=10_000)
+
+    with pytest.raises(ValueError, match="no overlapping bars"):
+        alpha_beta(strategy, benchmark)
