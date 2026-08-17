@@ -58,6 +58,22 @@ def test_zero_standard_error_leaves_a_degenerate_interval():
     assert estimate.excludes(0.0)
 
 
+def test_z_score_and_p_value_agree_with_excludes():
+    clear = Estimate.from_se(value=1.0, se=0.1, method="iid")
+    noisy = Estimate.from_se(value=1.0, se=5.0, method="iid")
+
+    assert clear.p_value(0.0) < 0.05
+    assert noisy.p_value(0.0) > 0.05
+    assert clear.z_score(0.0) == pytest.approx(clear.value / clear.se)
+
+
+def test_p_value_is_undefined_at_zero_standard_error():
+    estimate = Estimate.from_se(value=2.0, se=0.0, method="exact")
+
+    assert np.isnan(estimate.z_score())
+    assert np.isnan(estimate.p_value())
+
+
 def test_hypothesis_test_significance_respects_alpha():
     result = HypothesisTest(statistic=2.1, p_value=0.03, null="sharpe = 0", conclusion="reject")
 

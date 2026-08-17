@@ -36,8 +36,8 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     config = load_config()
 
-    # prints to reports/analysis_summary.txt
-    with tee_stdout_to_file(DEFAULT_REPORTS_DIR / "analysis_summary.txt"):
+    # prints to reports/appendix_backtest.txt
+    with tee_stdout_to_file(DEFAULT_REPORTS_DIR / "appendix_backtest.txt"):
         provider = build_provider(config)
         backtester = build_backtester(config)
         strategy_configs = config["strategies"]
