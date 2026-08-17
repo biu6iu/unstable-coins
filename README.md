@@ -4,7 +4,11 @@ A systematic trading research framework for cryptocurrency markets.
 The system fetches exchange market data, generates signals from a
 library of interchangeable strategies, and evaluates them through a
 fee- and slippage-aware, vectorised backtesting engine with
-out-of-sample validation, benchmarked against buy-and-hold.
+out-of-sample validation, benchmarked against buy-and-hold. Since
+Phase 16 the project is a statistical study of whether any of this is
+detectable at all: the backtest engine is the instrument, not the
+point, and the strategy comparison in the appendix below is not this
+project's result.
 
 ## Strategies
 
@@ -74,11 +78,23 @@ strategy families, since each is a bet on different market behaviour:
    path.
 
 
-## Backtesting
-Run with:
+## Running the analysis
+
+The statistical report is the primary entry point:
+```
+python scripts/run_analysis.py
+```
+writing `reports/statistical_report.txt` - sample size, return-process
+diagnostics, Sharpe intervals under three SE methods, alpha/beta
+attribution vs buy-and-hold, multiple-testing correction, and the
+power analysis summarised above.
+
+The per-strategy backtest comparison (below, in the appendix) is a
+supporting report, not the headline:
 ```
 python scripts/run_backtest.py
 ```
+writing `reports/appendix_backtest.txt` and the equity/signal plots.
 
 ## Paper Trading
 
@@ -111,7 +127,53 @@ Divergences between the two paths reveal what the backtest abstraction
 hides (partial bars, exchange data revisions, and poll-timing gaps)
 not a bug in the backtest engine itself.
 
-### Results
+## Statistical Findings
+
+BTC/USDT daily candles, 3,286 returns (9.0 years). Full run:
+`python scripts/run_analysis.py`, writing
+`reports/statistical_report.txt`.
+
+- **Non-normality is real but is not why the intervals are wide.**
+  Excess kurtosis is 8.8 and skew is -0.23, yet correcting for both
+  leaves buy-and-hold's 95% Sharpe interval at `[0.13, 1.44]` either
+  way (iid vs non-normal, Mertens' correction) - visually identical to
+  two decimal places. Sample size is what makes the interval span 1.3
+  Sharpe units, not fat tails.
+- **Returns are not iid, but not in the direction that matters for
+  Sharpe.** Ljung-Box Q(10) on squared returns is 217 against a 5%
+  critical value of 18.3 - volatility clusters strongly - while
+  directional autocorrelation is weak (-0.05 at lag 1). Lo's HAC
+  annualisation factor eta(365)=18.9 versus the naive sqrt(365)=19.1
+  is a 1% correction, not the 40% one an early draft of this analysis
+  mistakenly reported (a double-annualisation bug, since corrected).
+- **The reported best strategy is a maximum, not an estimate.** Across
+  the four grid-searched strategies, 58 parameter combinations are
+  backtested in total. Two (Donchian breakout, TSMOM) survive
+  per-strategy deflation, but White's Reality Check across all six
+  candidate strategies at once - the test that actually prices in the
+  full search - does not beat buy-and-hold (p=0.84).
+- **The real constraint is statistical power, not method.** Detecting
+  a true Sharpe difference of 0.25 between two strategies correlated
+  at 0.7 needs roughly 113 years of daily data at 80% power; a
+  difference of 0.5 needs about 28. This history has 9. Distinguishing
+  the current best strategy (Sharpe 1.04) from buy-and-hold (0.78)
+  would need on the order of 130 more years at this correlation and
+  effect size.
+
+**Conclusion: no strategy in this library is statistically
+distinguishable from buy-and-hold, or from each other, on the
+available history.** That is a finding about the measuring stick, not
+a verdict on any one strategy - see the full report for the per-strategy
+numbers, and `src/stats/power.py` for the sample-size arithmetic behind
+the last point. 
+
+## Strategy Backtests
+
+These are the raw backtest numbers the Statistical Findings section
+above is about. Read them as illustrations of what the engine
+computes, not as a ranking: see that section's power result for why
+this history cannot say the top row is actually better than the
+bottom one, or than any row in between.
 
 BTC/USDT daily candles, full available history - 3,281 bars
 (2017-08-17 to 2026-08-10), 0.1% fee, 5 bps slippage, 10,000 starting

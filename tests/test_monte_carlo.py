@@ -2,15 +2,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.analysis.monte_carlo import (
-    MonteCarloAnalyzer,
-    _block_bootstrap_matrix,
-    _perturb_prices,
-    _simple_bootstrap_matrix,
-)
+from src.analysis.monte_carlo import MonteCarloAnalyzer, _perturb_prices
 from src.backtest.engine import Backtester
 from src.backtest.result import BacktestResult
 from src.evaluation.metrics import sharpe_ratio
+from src.stats.resampling import block_bootstrap_matrix, simple_bootstrap_matrix
 from src.strategies.base import Strategy
 
 
@@ -66,8 +62,8 @@ class _FixedSignalStrategy(Strategy):
 
 def test_block_bootstrap_with_block_length_one_matches_simple_bootstrap():
     n, n_trials = 30, 200
-    simple = _simple_bootstrap_matrix(n, n_trials, np.random.default_rng(7))
-    block = _block_bootstrap_matrix(n, 1, n_trials, np.random.default_rng(7))
+    simple = simple_bootstrap_matrix(n, n_trials, np.random.default_rng(7))
+    block = block_bootstrap_matrix(n, 1, n_trials, np.random.default_rng(7))
 
     np.testing.assert_array_equal(simple, block)
 

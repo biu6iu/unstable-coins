@@ -5,7 +5,8 @@ import pandas as pd
 
 from src.backtest.engine import Backtester
 from src.backtest.result import BacktestResult
-from src.evaluation.metrics import ANNUALISATION_FACTOR, max_drawdown, sharpe_ratio
+from src.evaluation.metrics import max_drawdown, sharpe_ratio
+from src.stats.resampling import block_bootstrap_matrix, paired_returns, trial_sharpes
 from src.strategies.base import Strategy
 
 PERCENTILES = (5, 25, 50, 75, 95)
@@ -21,7 +22,6 @@ class MonteCarloResult:
     Distributions of final equity and max drawdown from resampled trials of one strategy's daily returns,
     compared with historical values
     """
-
     final_equity: np.ndarray
     max_drawdown: np.ndarray
     sharpe: np.ndarray
@@ -64,7 +64,7 @@ class NoiseRobustnessResult:
 @dataclass
 class PairedComparisonResult:
     """
-    Distribution of the Sharpe DIFFERENCE between two strategies, measured on shared resampled histories
+    Distribution of the Sharpe difference between two strategies, measured on shared resampled histories
     """
 
     sharpe_delta: np.ndarray
@@ -97,51 +97,6 @@ class PairedComparisonResult:
         """
         percentiles = self.delta_percentiles()
         return percentiles[5] > 0 or percentiles[95] < 0
-
-
-def _simple_bootstrap_matrix(n: int, n_trials: int, rng: np.random.Generator) -> np.ndarray:
-    """iid resampling"""
-    return rng.integers(0, n, size=(n_trials, n))
-
-
-def _block_bootstrap_matrix(n: int, block_length: int, n_trials: int, rng: np.random.Generator) -> np.ndarray:
-    if block_length <= 1:
-        return _simple_bootstrap_matrix(n, n_trials, rng)
-
-    # ceil(n / block_length)
-    n_blocks = -(-n // block_length)  
-    block_starts = rng.integers(0, n - block_length + 1, size=(n_trials, n_blocks))
-    offsets = np.arange(block_length)
-    indices = block_starts[:, :, None] + offsets[None, None, :]
-    return indices.reshape(n_trials, n_blocks * block_length)[:, :n]
-
-
-def _trial_sharpes(sampled_returns: np.ndarray) -> np.ndarray:
-    """annualised Sharpe of every bootstrap trial; a trial whose resampled returns never vary has no Sharpe"""
-    # ddof=1 to match pandas' std
-    trial_std = sampled_returns.std(axis=1, ddof=1)
-    with np.errstate(invalid="ignore", divide="ignore"):
-        return np.where(
-            trial_std > 0,
-            sampled_returns.mean(axis=1) / trial_std * np.sqrt(ANNUALISATION_FACTOR),
-            np.nan,
-        )
-
-
-def _paired_returns(result_a: BacktestResult, result_b: BacktestResult) -> tuple[np.ndarray, np.ndarray]:
-    """
-    both strategies' daily returns over the bars they share
-
-    pairing only means anything if the two series describe the same days, so the comparison is restricted to the overlap rather than quietly scoring two different periods against each other
-    """
-    aligned = pd.DataFrame(
-        {"a": result_a.strategy_returns, "b": result_b.strategy_returns}
-    ).dropna()
-    if aligned.empty:
-        raise ValueError(
-            f"{result_a.strategy_name} and {result_b.strategy_name} share no overlapping bars to compare on"
-        )
-    return aligned["a"].to_numpy(), aligned["b"].to_numpy()
 
 
 def _perturb_prices(df: pd.DataFrame, noise_std: float, rng: np.random.Generator) -> pd.DataFrame:
@@ -181,7 +136,7 @@ class MonteCarloAnalyzer:
         starting_equity = float(result.equity_curve.iloc[0])
 
         rng = np.random.default_rng(self.seed)
-        indices = _block_bootstrap_matrix(n, block_length, self.n_trials, rng)
+        indices = block_bootstrap_matrix(n, block_length, self.n_trials, rng)
         sampled_returns = returns[indices]
 
         equity_paths = starting_equity * np.cumprod(1 + sampled_returns, axis=1)
@@ -189,7 +144,7 @@ class MonteCarloAnalyzer:
         running_max = np.maximum.accumulate(equity_paths, axis=1)
         trial_max_drawdown = (equity_paths / running_max - 1).min(axis=1)
 
-        trial_sharpe = _trial_sharpes(sampled_returns)
+        trial_sharpe = trial_sharpes(sampled_returns)
 
         actual_max_drawdown = max_drawdown(result.equity_curve)
 
@@ -233,13 +188,13 @@ class MonteCarloAnalyzer:
         bootstrap the Sharpe difference between two strategies over shared resampled bars
         """
         block_length = self.block_length if block_length is None else block_length
-        returns_a, returns_b = _paired_returns(result_a, result_b)
+        returns_a, returns_b = paired_returns(result_a, result_b)
 
         rng = np.random.default_rng(self.seed)
-        indices = _block_bootstrap_matrix(len(returns_a), block_length, self.n_trials, rng)
+        indices = block_bootstrap_matrix(len(returns_a), block_length, self.n_trials, rng)
 
         return PairedComparisonResult(
-            sharpe_delta=_trial_sharpes(returns_a[indices]) - _trial_sharpes(returns_b[indices]),
+            sharpe_delta=trial_sharpes(returns_a[indices]) - trial_sharpes(returns_b[indices]),
             actual_sharpe_a=float(sharpe_ratio(result_a.strategy_returns)),
             actual_sharpe_b=float(sharpe_ratio(result_b.strategy_returns)),
             name_a=result_a.strategy_name,
